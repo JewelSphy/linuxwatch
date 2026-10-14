@@ -361,7 +361,7 @@ td.n,th.n{text-align:right}
     if (state.demo) return;
     state.demo = true;
     setLive(false, "demo data");
-    $("mode").textContent = "server not reachable — showing demo data";
+    $("mode").textContent = /vercel\.app/.test(location.host) ? "demo deployment · sample data · run your own server for live data" : "server not reachable — showing demo data";
   }
   function setLive(on, text) { $("live").classList.toggle("on", on); $("liveText").textContent = text; }
 
@@ -751,7 +751,7 @@ td.n,th.n{text-align:right}
   setInterval(function () { $("clock").textContent = new Date().toTimeString().slice(0, 8); }, 1000);
 
   /* ---------------- start ---------------- */
-  if (location.protocol === "file:" || /claude\.ai|claudeusercontent/.test(location.host)) enterDemo();
+  if (location.protocol === "file:" || /claude\.ai|claudeusercontent|vercel\.app/.test(location.host)) enterDemo();
   api("/hosts", demo.hosts).then(function (list) {
     setHosts(list);
     loadAlerts();
