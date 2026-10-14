@@ -2,8 +2,7 @@
 
 A self-hosted Linux server monitoring system. Lightweight Python agents collect system metrics on each machine and send them to a central FastAPI server, which stores the history, fires smart alerts, and serves a live dashboard.
 
-![LinuxWatch dashboard](docs/dashboard.png)
-<!-- Add a screenshot at docs/dashboard.png -->
+
 
 ---
 
