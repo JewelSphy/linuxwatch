@@ -279,7 +279,7 @@ td.n,th.n{text-align:right}
     if (m <= 1440) {
       return api("/metrics?host=" + encodeURIComponent(host) + "&minutes=" + m, function () { return demo.metrics(host, m); });
     }
-    return api("/history?host=" + encodeURIComponent(host) + "&days=" + Math.round(m / 1440), function () { return []; })
+    return apiSoft("/history?host=" + encodeURIComponent(host) + "&days=" + Math.round(m / 1440), function () { return []; })
       .then(function (list) {
         if (state.demo) return demo.metrics(host, m);
         return list.map(function (h) {
@@ -349,6 +349,13 @@ td.n,th.n{text-align:right}
     if (state.demo) return Promise.resolve(fallback());
     return fetch(path).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
       .catch(function () { enterDemo(); return fallback(); });
+  }
+
+  /* optional features (storage.py, detect.py): a missing route returns empty, never flips to demo */
+  function apiSoft(path, fallback) {
+    if (state.demo) return Promise.resolve(fallback());
+    return fetch(path).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .catch(function () { return []; });
   }
   function enterDemo() {
     if (state.demo) return;
@@ -623,7 +630,7 @@ td.n,th.n{text-align:right}
     else if (!state.demo) $("mode").textContent = "";
     fetchRows(name).then(function (rows) {
       if (state.minutes > 1440) return [rows, []];
-      return api("/anomalies?host=" + encodeURIComponent(name) + "&minutes=" + state.minutes, function () { return demo.anoms(name, rows); })
+      return apiSoft("/anomalies?host=" + encodeURIComponent(name) + "&minutes=" + state.minutes, function () { return demo.anoms(name, rows); })
         .then(function (a) { return [rows, a]; });
     }).then(function (res) {
       if (state.selected !== name) return;
@@ -639,8 +646,8 @@ td.n,th.n{text-align:right}
   }
 
   function loadSmart() {
-    api("/anomalies/now", demo.anomNow).then(function (list) { state.anomNow = list; renderBanner(); });
-    api("/forecast", demo.forecast).then(function (list) { state.forecast = list; renderForecast(); renderBanner(); });
+    apiSoft("/anomalies/now", demo.anomNow).then(function (list) { state.anomNow = list; renderBanner(); });
+    apiSoft("/forecast", demo.forecast).then(function (list) { state.forecast = list; renderForecast(); renderBanner(); });
   }
 
   function loadAlerts() {

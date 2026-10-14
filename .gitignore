@@ -13,3 +13,6 @@ linuxwatch.log*
 venv/
 __pycache__/
 *.pyc
+
+# editor
+.vscode/

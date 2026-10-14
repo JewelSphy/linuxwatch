@@ -169,3 +169,7 @@ async def live_hosts(ws: WebSocket):
          await asyncio.sleep(5)
    except WebSocketDisconnect:
       pass
+
+
+from storage import attach
+attach(app)
