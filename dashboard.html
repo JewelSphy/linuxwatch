@@ -279,7 +279,7 @@ td.n,th.n{text-align:right}
     if (m <= 1440) {
       return api("/metrics?host=" + encodeURIComponent(host) + "&minutes=" + m, function () { return demo.metrics(host, m); });
     }
-    return apiSoft("/history?host=" + encodeURIComponent(host) + "&days=" + Math.round(m / 1440), function () { return []; })
+    return api("/history?host=" + encodeURIComponent(host) + "&days=" + Math.round(m / 1440), function () { return []; })
       .then(function (list) {
         if (state.demo) return demo.metrics(host, m);
         return list.map(function (h) {
@@ -630,7 +630,7 @@ td.n,th.n{text-align:right}
     else if (!state.demo) $("mode").textContent = "";
     fetchRows(name).then(function (rows) {
       if (state.minutes > 1440) return [rows, []];
-      return apiSoft("/anomalies?host=" + encodeURIComponent(name) + "&minutes=" + state.minutes, function () { return demo.anoms(name, rows); })
+      return api("/anomalies?host=" + encodeURIComponent(name) + "&minutes=" + state.minutes, function () { return demo.anoms(name, rows); })
         .then(function (a) { return [rows, a]; });
     }).then(function (res) {
       if (state.selected !== name) return;
@@ -646,8 +646,8 @@ td.n,th.n{text-align:right}
   }
 
   function loadSmart() {
-    apiSoft("/anomalies/now", demo.anomNow).then(function (list) { state.anomNow = list; renderBanner(); });
-    apiSoft("/forecast", demo.forecast).then(function (list) { state.forecast = list; renderForecast(); renderBanner(); });
+    api("/anomalies/now", demo.anomNow).then(function (list) { state.anomNow = list; renderBanner(); });
+    api("/forecast", demo.forecast).then(function (list) { state.forecast = list; renderForecast(); renderBanner(); });
   }
 
   function loadAlerts() {
