@@ -9,7 +9,7 @@ LinuxWatch: self-hosted Linux monitoring. Flat Python project (no package, no bu
 ## Commands
 
 ```bash
-bash setup.sh                      # apt python3-venv, creates ./venv, pip installs fastapi uvicorn psutil twisted, prints 2 random API keys
+bash setup.sh                      # apt python3-venv, creates ./venv, pip installs requirements.txt, prints 2 random API keys
 cp config.example.ini config.ini   # paste keys; config.ini is gitignored
 
 ./venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000   # central server + dashboard at /, API docs at /docs
@@ -23,14 +23,14 @@ No test suite, no lint command. Scripts import `config` from cwd-relative siblin
 
 Two independent pipelines that share only `config.py` and, loosely, the dashboard:
 
-1. **Distributed pipeline (agent -> server).** `agent.py` samples a small reading (cpu, ram, disk, swap, load_1, net deltas), POSTs to `server.py` with `X-API-Key`. Server maps key -> host name via `[api_keys]` and inserts into `host_metrics` in `server.db` (`SERVER_DB_PATH`). Agent appends to `buffer.jsonl` when server unreachable and flushes oldest-first on next success. Host "up" = last reading newer than `INTERVAL * 3`.
-2. **Local pipeline (`monitor.py`).** Full metric set (per-core, processes, temp, connections, services, SSH failures via `ssh_watch.py`) written to `linuxwatch.db` (`DB_PATH`) using `schema.sql` (`server_metrics` + child tables). Does NOT talk to the server.
+1. **Distributed pipeline (agent -> server).** `agent.py` samples a small reading (cpu, ram, disk, swap, load_1, net deltas), POSTs to `server.py` with `X-API-Key`. Server maps key -> host name via `[api_keys]` and inserts into `host_metrics` in `server.db` (`SERVER_DB_PATH`). Agent appends to `buffer.jsonl` when server unreachable and flushes oldest-first in `POST /metrics/batch` chunks on next success (falls back to single posts against a server without the batch route). Host "up" = last reading newer than `INTERVAL * 3`.
+2. **Local pipeline (`monitor.py`).** Full metric set (per-core, processes, temp, connections, services, SSH failures via `ssh_watch.py`) collected in one shared 1 s sample window inside a worker thread, written to `linuxwatch.db` (`DB_PATH`) using `schema.sql` (`server_metrics` + child tables). Does NOT talk to the server.
 
 Bridge: `server.py` `GET /alerts` reads the `alerts` table straight out of the local `linuxwatch.db` (returns `[]` if file or table missing), so server and `monitor.py` must run on the same box for alert history to show.
 
-`server.py` also serves `dashboard.html` at `/`, `/hosts`, `GET /metrics`, `/health`, and `/ws` (pushes `/hosts` every 5 s). Bottom of `server.py` calls `storage.attach(app)`, which registers the router (`/history`, `/prometheus`), runs `init_storage()` and starts a daemon thread (`cleanup_loop`) that rolls raw rows into `host_metrics_hourly` then deletes expired raw/hourly rows (`[storage]` config).
+`db.py` owns SQLite access: `connect(path)` is a context manager over a per-thread cached connection (WAL, row factory `sqlite3.Row`, commit on exit). All modules use it; `init_server_db()` creates every server table/index.
 
-`detect.py` (z-score `/anomalies`, `/anomalies/now`, linear-fit disk `/forecast`, `[detect]` config) exposes `attach(app)` but **server.py never calls it** — routes are not live until wired in. Dashboard uses `apiSoft()` for these optional routes so missing ones return empty without triggering demo mode.
+`server.py` also serves `dashboard.html` at `/` (gzip middleware on), `/hosts`, `GET /metrics`, `/health`, and `/ws` (pushes a 2 s-cached `/hosts` snapshot every 5 s, one query shared by all clients). It mounts `storage.router` (`/history`, `/prometheus`) and `detect.router` (z-score `/anomalies`, `/anomalies/now`, disk `/forecast` with least-squares sums computed in SQL). A lifespan hook starts `storage.start_cleanup()`: first pass rolls the full raw window into `host_metrics_hourly`, later passes only the last `rollup_lookback_hours`, then deletes expired rows (`[storage]` config).
 
 `config.py` is the single config loader (`configparser` over `config.ini`, every value has a fallback, so missing config still imports). Other modules import constants from it; `storage.py`/`detect.py` also read their own sections via the exported `config` object.
 
@@ -40,6 +40,5 @@ Bridge: `server.py` `GET /alerts` reads the `alerts` table straight out of the l
 
 - `alerts.py` `check_metric()` (Discord, cooldown, DB history, RESOLVED) is **not called** by `monitor.py`; `monitor.check_alerts()` only uses `stayed_high` and logs. Also `schema.sql` has no `alerts` table, which `alerts.py` and `/alerts` expect. Alert history/Discord path is incomplete.
 - `alerts.py` state (`over_count`, `last_sent`, `active`) is in-memory module globals; lost on restart.
-- `storage.py` creates `idx_host_ts` on `host_metrics`; table is created in `server.py` at import. Import order matters: `init_server_db()` must run before `storage.attach`.
-- Code style: 3-space indentation in most modules (monitor.py mixes 3 and 4). Match surrounding file.
+- Code style: 3-space indentation in most modules. Match surrounding file.
 - `config.ini`, `*.db`, `buffer.jsonl`, logs are gitignored; never commit them.

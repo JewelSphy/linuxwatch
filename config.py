@@ -17,11 +17,7 @@ DISK_WARNING = config.getfloat("thresholds", "disk_warning", fallback=90)
 
 INTERVAL = config.getfloat("monitor", "interval", fallback=60)
 
-services_text = config.get("monitor", "services", fallback="sshd, cron, nginx")
-SERVICES = []
-for s in services_text.split(","):
-   if s.strip():
-      SERVICES.append(s.strip())
+SERVICES = [s.strip() for s in config.get("monitor", "services", fallback="sshd, cron, nginx").split(",") if s.strip()]
 
 DB_PATH = os.path.join(BASE_DIR, config.get("paths", "database", fallback="linuxwatch.db"))
 LOG_PATH = os.path.join(BASE_DIR, config.get("paths", "log_file", fallback="linuxwatch.log"))

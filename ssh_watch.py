@@ -39,32 +39,35 @@ def ask_ssh_permission():
       print("Could not change permission. SSH logins: skipped")
 
 
-def get_ssh_failed_total():
-   path = find_auth_log()
-   if path is None:
-      return None
-   count = 0
-   try:
-      with open(path, errors="ignore") as f:
-         for line in f:
-            if "sshd" in line and ("Failed password" in line or "Invalid user" in line):
-               count = count + 1
-   except PermissionError:
-      return None
-   return count
+def is_failed_login(line):
+   return "sshd" in line and ("Failed password" in line or "Invalid user" in line)
 
 
-last_ssh_failed = None
+# (path, inode, byte offset) of the last read, so each call only reads new lines
+position = None
 
 
 def get_ssh_failed_interval():
-   global last_ssh_failed
-   current = get_ssh_failed_total()
-   if current is None:
+   """Failed SSH logins since the previous call, reading only the bytes appended since then."""
+   global position
+   path = find_auth_log()
+   if path is None:
       return None
-   if last_ssh_failed is None or current < last_ssh_failed:
-      last_ssh_failed = current
-      return 0
-   interval = current - last_ssh_failed
-   last_ssh_failed = current
-   return interval
+   try:
+      stat = os.stat(path)
+      if position is None:
+         position = (path, stat.st_ino, stat.st_size)
+         return 0
+      last_path, last_inode, offset = position
+      if last_path != path or last_inode != stat.st_ino or stat.st_size < offset:
+         offset = 0   # rotated or truncated: count the new file from its start
+      with open(path, "rb") as f:
+         f.seek(offset)
+         chunk = f.read()
+   except PermissionError:
+      return None
+
+   end = chunk.rfind(b"\n") + 1   # leave a half-written last line for the next call
+   count = sum(1 for line in chunk[:end].decode(errors="ignore").splitlines() if is_failed_login(line))
+   position = (path, stat.st_ino, offset + end)
+   return count

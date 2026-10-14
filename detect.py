@@ -1,8 +1,11 @@
 import time
 import math
-import sqlite3
+from bisect import bisect_left
+from itertools import groupby
+from operator import itemgetter
 from fastapi import APIRouter
 from config import SERVER_DB_PATH, INTERVAL, config
+from db import connect
 
 
 WINDOW = config.getint("detect", "window", fallback=30)
@@ -15,140 +18,133 @@ METRICS = ["cpu", "ram"]
 router = APIRouter()
 
 
-def mean_and_std(values):
-   n = len(values)
-   mean = sum(values) / n
-   total = 0
-   for v in values:
-      total = total + (v - mean) ** 2
-   std = math.sqrt(total / n)
-   return mean, std
-
-
-def check_point(window_values, value):
-   mean, std = mean_and_std(window_values)
-   if std < 1:
-      std = 1
+def score(mean, variance, value):
+   """Return the anomaly details if `value` is far outside the window's mean, else None."""
+   std = max(1.0, math.sqrt(max(0.0, variance)))
    z = (value - mean) / std
    if abs(z) >= Z_LIMIT and abs(value - mean) >= MIN_JUMP:
-      low = max(0, mean - Z_LIMIT * std)
-      high = min(100, mean + Z_LIMIT * std)
-      return {"z": round(z, 1), "mean": round(mean, 1), "low": round(low, 1), "high": round(high, 1)}
+      return {
+         "z": round(z, 1),
+         "mean": round(mean, 1),
+         "low": round(max(0, mean - Z_LIMIT * std), 1),
+         "high": round(min(100, mean + Z_LIMIT * std), 1),
+      }
    return None
 
 
-def get_rows(host, since):
-   conn = sqlite3.connect(SERVER_DB_PATH)
-   cursor = conn.cursor()
+def check_point(window_values, value):
+   n = len(window_values)
+   mean = sum(window_values) / n
+   variance = sum((v - mean) ** 2 for v in window_values) / n
+   return score(mean, variance, value)
 
 
-   cursor.execute("""
-       SELECT ts, cpu, ram, disk
-       FROM host_metrics
-       WHERE host = ? AND ts >= ?
-       ORDER BY ts
-   """, (host, since))
-   rows = cursor.fetchall()
-
-
-   conn.close()
-   return rows
-
-
-def get_hosts():
-   conn = sqlite3.connect(SERVER_DB_PATH)
-   cursor = conn.cursor()
-
-
-   cursor.execute("SELECT DISTINCT host FROM host_metrics ORDER BY host")
-   hosts = []
-   for (host,) in cursor.fetchall():
-      hosts.append(host)
-
-
-   conn.close()
-   return hosts
+def rolling_hits(values, first):
+   """Score values[i] for i >= first against the WINDOW values before it, in O(n) via running sums."""
+   total = sum(values[:WINDOW])
+   total_sq = sum(v * v for v in values[:WINDOW])
+   for i in range(WINDOW, len(values)):
+      if i >= first:
+         mean = total / WINDOW
+         hit = score(mean, total_sq / WINDOW - mean * mean, values[i])
+         if hit:
+            yield i, hit
+      old, new = values[i - WINDOW], values[i]
+      total += new - old
+      total_sq += new * new - old * old
 
 
 @router.get("/anomalies")
 def anomalies(host: str, minutes: int = 60):
    since = time.time() - minutes * 60
-   rows = get_rows(host, since - WINDOW * INTERVAL)
+   with connect(SERVER_DB_PATH) as conn:
+      rows = conn.execute("""
+          SELECT ts, cpu, ram
+          FROM host_metrics
+          WHERE host = ? AND ts >= ?
+          ORDER BY ts
+      """, (host, since - WINDOW * INTERVAL)).fetchall()
 
+   timestamps = [row[0] for row in rows]
+   first = bisect_left(timestamps, since)
    found = []
    for m, metric in enumerate(METRICS):
-      values = []
-      for row in rows:
-         values.append(row[m + 1])
-      for i in range(WINDOW, len(rows)):
-         if rows[i][0] < since:
-            continue
-         hit = check_point(values[i - WINDOW:i], values[i])
-         if hit:
-            hit["ts"] = rows[i][0]
-            hit["metric"] = metric
-            hit["value"] = values[i]
-            found.append(hit)
+      values = [row[m + 1] for row in rows]
+      for i, hit in rolling_hits(values, first):
+         hit["ts"] = timestamps[i]
+         hit["metric"] = metric
+         hit["value"] = values[i]
+         found.append(hit)
    return found
 
 
 @router.get("/anomalies/now")
 def anomalies_now():
    since = time.time() - (WINDOW + 5) * INTERVAL
+   with connect(SERVER_DB_PATH) as conn:
+      rows = conn.execute("""
+          SELECT host, ts, cpu, ram
+          FROM host_metrics
+          WHERE ts >= ?
+          ORDER BY host, ts
+      """, (since,)).fetchall()
+
    found = []
-   for host in get_hosts():
-      rows = get_rows(host, since)
-      if len(rows) <= WINDOW:
+   for host, group in groupby(rows, key=itemgetter(0)):
+      host_rows = list(group)
+      if len(host_rows) <= WINDOW:
          continue
       for m, metric in enumerate(METRICS):
-         values = []
-         for row in rows:
-            values.append(row[m + 1])
+         values = [row[m + 2] for row in host_rows]
          hit = check_point(values[-WINDOW - 1:-1], values[-1])
          if hit:
             hit["host"] = host
             hit["metric"] = metric
             hit["value"] = values[-1]
-            hit["ts"] = rows[-1][0]
+            hit["ts"] = host_rows[-1][1]
             found.append(hit)
    return found
-
-
-def fit_line(xs, ys):
-   n = len(xs)
-   mean_x = sum(xs) / n
-   mean_y = sum(ys) / n
-   top = 0
-   bottom = 0
-   for i in range(n):
-      top = top + (xs[i] - mean_x) * (ys[i] - mean_y)
-      bottom = bottom + (xs[i] - mean_x) ** 2
-   if bottom == 0:
-      return 0, mean_y
-   slope = top / bottom
-   intercept = mean_y - slope * mean_x
-   return slope, intercept
 
 
 @router.get("/forecast")
 def forecast():
    now = time.time()
    since = now - FORECAST_DAYS * 86400
+
+   # least-squares sums computed inside SQLite, so no raw rows are loaded into Python
+   with connect(SERVER_DB_PATH) as conn:
+      hosts = [row[0] for row in conn.execute("SELECT DISTINCT host FROM host_metrics ORDER BY host")]
+      stats = {row[0]: row for row in conn.execute("""
+          SELECT host, COUNT(*), MIN(ts), MAX(ts),
+                 SUM((ts - :now) / 86400.0),
+                 SUM(disk),
+                 SUM((ts - :now) / 86400.0 * disk),
+                 SUM((ts - :now) / 86400.0 * (ts - :now) / 86400.0)
+          FROM host_metrics
+          WHERE ts >= :since
+          GROUP BY host
+      """, {"now": now, "since": since})}
+      latest = {row[0]: row[1] for row in conn.execute("""
+          SELECT host, disk, MAX(ts)
+          FROM host_metrics
+          WHERE ts >= ?
+          GROUP BY host
+      """, (since,))}
+
    results = []
-   for host in get_hosts():
-      rows = get_rows(host, since)
-      if len(rows) < 30 or rows[-1][0] - rows[0][0] < 6 * 3600:
-         results.append({"host": host, "status": "learning", "disk_now": rows[-1][3] if rows else None})
+   for host in hosts:
+      disk_now = latest.get(host)
+      if host not in stats:
+         results.append({"host": host, "status": "learning", "disk_now": None})
          continue
 
-      xs = []
-      ys = []
-      for row in rows:
-         xs.append((row[0] - now) / 86400)
-         ys.append(row[3])
+      _, n, first_ts, last_ts, sx, sy, sxy, sxx = stats[host]
+      if n < 30 or last_ts - first_ts < 6 * 3600:
+         results.append({"host": host, "status": "learning", "disk_now": disk_now})
+         continue
 
-      slope, intercept = fit_line(xs, ys)
-      disk_now = ys[-1]
+      bottom = sxx - sx * sx / n
+      slope = (sxy - sx * sy / n) / bottom if bottom else 0
 
       if slope <= 0.05:
          results.append({"host": host, "status": "stable", "disk_now": disk_now, "slope_per_day": round(slope, 3)})
@@ -166,7 +162,3 @@ def forecast():
 
    results.sort(key=lambda r: r.get("days_to_full", 99999))
    return results
-
-
-def attach(app):
-   app.include_router(router)

@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 sudo apt install -y python3-venv
 python3 -m venv venv
-./venv/bin/pip install fastapi uvicorn psutil twisted
+./venv/bin/pip install -r requirements.txt
 
 echo ""
 echo "Setup done. Two API keys for config.ini:"

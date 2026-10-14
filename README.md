@@ -73,6 +73,8 @@ flowchart LR
 | Config | `config.ini` / `config.py` | All settings in one place, safe defaults |
 | Logging | `log_setup.py` | Screen + rotating file logs |
 | Schema | `schema.sql` | Tables for the local collector |
+| Storage / detection | `storage.py`, `detect.py` | Retention + hourly rollups + Prometheus; anomaly and disk forecast routes |
+| DB helper | `db.py` | Per-thread cached SQLite connections (WAL), server schema |
 
 ---
 
@@ -151,9 +153,15 @@ Each key in `[api_keys]` belongs to one host. The server rejects unknown keys wi
 | `GET` | `/` | Dashboard |
 | `GET` | `/health` | Server status |
 | `POST` | `/metrics` | Agent sends a reading (header `X-API-Key`) |
+| `POST` | `/metrics/batch` | Agent resends buffered readings, up to 1000 per request |
 | `GET` | `/hosts` | Every host with up/down status and latest values |
 | `GET` | `/metrics?host=&minutes=` | History for one host |
 | `GET` | `/alerts?limit=` | Alert history |
+| `GET` | `/history?host=&days=` | Hourly rollups for one host |
+| `GET` | `/prometheus` | Prometheus text metrics |
+| `GET` | `/anomalies?host=&minutes=` | Rolling z-score anomalies for one host |
+| `GET` | `/anomalies/now` | Anomalies in the latest reading, all hosts |
+| `GET` | `/forecast` | Disk-full forecast per host |
 | `WS` | `/ws` | Live host list, pushed every 5 s |
 
 Interactive API docs: **http://localhost:8000/docs**
