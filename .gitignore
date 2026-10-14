@@ -1,0 +1,15 @@
+# secrets
+config.ini
+
+# data
+*.db
+buffer.jsonl
+
+# logs
+*.log
+linuxwatch.log*
+
+# python
+venv/
+__pycache__/
+*.pyc
