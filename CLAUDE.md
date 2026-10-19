@@ -2,43 +2,39 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Overview
-
-LinuxWatch: self-hosted Linux monitoring. Flat Python project (no package, no build step, no tests, no linter config). Python 3.12, FastAPI, psutil, Twisted, SQLite, one vanilla-JS `dashboard.html`.
-
 ## Commands
 
+No tests, linter, or build step exist (pytest/CI are roadmap items only).
+
 ```bash
-bash setup.sh                      # apt python3-venv, creates ./venv, pip installs requirements.txt, prints 2 random API keys
-cp config.example.ini config.ini   # paste keys; config.ini is gitignored
+bash setup.sh                      # apt python3-venv, creates ./venv, installs fastapi uvicorn psutil twisted; prints 2 API keys
+cp config.example.ini config.ini   # then paste keys; config.ini is gitignored
 
-./venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000   # central server + dashboard at /, API docs at /docs
-./venv/bin/python agent.py                                  # per-machine agent -> POST /metrics
-./venv/bin/python monitor.py                                # standalone local collector (Twisted reactor)
+./venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000   # central server + dashboard + /docs
+./venv/bin/python agent.py         # per-machine agent -> POST /metrics
+./venv/bin/python monitor.py       # local collector + alert engine (Twisted reactor)
 ```
-
-No test suite, no lint command. Scripts import `config` from cwd-relative siblings, so run from repo root.
 
 ## Architecture
 
-Two independent pipelines that share only `config.py` and, loosely, the dashboard:
+Two independent pipelines that only meet in `server.py`:
 
-1. **Distributed pipeline (agent -> server).** `agent.py` samples a small reading (cpu, ram, disk, swap, load_1, net deltas), POSTs to `server.py` with `X-API-Key`. Server maps key -> host name via `[api_keys]` and inserts into `host_metrics` in `server.db` (`SERVER_DB_PATH`). Agent appends to `buffer.jsonl` when server unreachable and flushes oldest-first in `POST /metrics/batch` chunks on next success (falls back to single posts against a server without the batch route). Host "up" = last reading newer than `INTERVAL * 3`.
-2. **Local pipeline (`monitor.py`).** Full metric set (per-core, processes, temp, connections, services, SSH failures via `ssh_watch.py`) collected in one shared 1 s sample window inside a worker thread, written to `linuxwatch.db` (`DB_PATH`) using `schema.sql` (`server_metrics` + child tables). Does NOT talk to the server.
+1. **Agent -> server (fleet metrics).** `agent.py` collects a small reading (cpu/ram/disk/swap/load_1/net_in/net_out) and POSTs it to `/metrics` with `X-API-Key`; failed sends are buffered to `buffer.jsonl` and flushed oldest-first via `POST /metrics/batch` (falls back to single posts if the server lacks the batch route). `server.py` maps key -> hostname via `[api_keys]` (`host_for_key`) and stores rows in `server.db` (`host_metrics`). `/ws` pushes a shared, briefly cached `/hosts` snapshot every 5 s.
+2. **Local collector (`monitor.py`).** Richer metric set (per-core CPU, processes, temp, services, SSH fails via `ssh_watch.py`) taken in one 1 s sample window inside a worker thread, saved to a *separate* DB, `linuxwatch.db` (`schema.sql`, which also defines `alerts`). `alerts.check_metric` implements duration + cooldown + Discord webhook + fired/resolved history. `server.py` `GET /alerts` reads that DB directly (returns `[]` if file/table missing), so alerts only appear when `monitor.py` runs on the same box as the server.
 
-Bridge: `server.py` `GET /alerts` reads the `alerts` table straight out of the local `linuxwatch.db` (returns `[]` if file or table missing), so server and `monitor.py` must run on the same box for alert history to show.
+`db.py` owns SQLite access: `connect(path)` is a context manager over a per-thread cached WAL connection (commit on exit); `init_server_db()` creates server tables. Use it instead of raw `sqlite3.connect`.
 
-`db.py` owns SQLite access: `connect(path)` is a context manager over a per-thread cached connection (WAL, row factory `sqlite3.Row`, commit on exit). All modules use it; `init_server_db()` creates every server table/index.
+`config.py` is the single settings module: parses `config.ini` with `fallback=` defaults for everything, so scripts run with no config file. New tunables go there (or `config.getX(..., fallback=)` as `storage.py`/`detect.py` do for their own sections).
 
-`server.py` also serves `dashboard.html` at `/` (gzip middleware on), `/hosts`, `GET /metrics`, `/health`, and `/ws` (pushes a 2 s-cached `/hosts` snapshot every 5 s, one query shared by all clients). It mounts `storage.router` (`/history`, `/prometheus`) and `detect.router` (z-score `/anomalies`, `/anomalies/now`, disk `/forecast` with least-squares sums computed in SQL). A lifespan hook starts `storage.start_cleanup()`: first pass rolls the full raw window into `host_metrics_hourly`, later passes only the last `rollup_lookback_hours`, then deletes expired rows (`[storage]` config).
+### Route modules
 
-`config.py` is the single config loader (`configparser` over `config.ini`, every value has a fallback, so missing config still imports). Other modules import constants from it; `storage.py`/`detect.py` also read their own sections via the exported `config` object.
+`storage.py` (`/history`, `/prometheus`, incremental hourly rollups + retention cleanup thread started from the FastAPI lifespan) and `detect.py` (`/anomalies`, `/anomalies/now`, `/forecast`) each expose an `APIRouter` that `server.py` mounts. Add new optional feature routes the same way.
 
-`dashboard.html`: self-contained SPA, `api()` falls back to built-in demo data on any fetch failure, `file:` protocol, claude.ai, or `*.vercel.app` host (`vercel.json` rewrites `/` to the HTML for the static demo deploy). Change demo behavior via `enterDemo()` and the `demo` object near the top of the script.
+### Dashboard
 
-## Gotchas
+`dashboard.html` is a single-file vanilla JS + SVG SPA, served by `GET /` (and by the `vercel.json` rewrite for the static Vercel demo). If the API is unreachable it flips `state.demo = true` and renders generated sample data (`demo` object). Optional-feature routes (`/history`, `/anomalies`, `/forecast`) soft-fail to empty instead of triggering demo mode; keep that distinction when adding routes.
 
-- `alerts.py` `check_metric()` (Discord, cooldown, DB history, RESOLVED) is **not called** by `monitor.py`; `monitor.check_alerts()` only uses `stayed_high` and logs. Also `schema.sql` has no `alerts` table, which `alerts.py` and `/alerts` expect. Alert history/Discord path is incomplete.
-- `alerts.py` state (`over_count`, `last_sent`, `active`) is in-memory module globals; lost on restart.
-- Code style: 3-space indentation in most modules. Match surrounding file.
-- `config.ini`, `*.db`, `buffer.jsonl`, logs are gitignored; never commit them.
+## Conventions
+
+- Code uses 3-space indentation in `server.py`/`storage.py`/`detect.py`/`config.py`/`agent.py` (monitor.py uses 4); match the file you edit.
+- `*.db`, `buffer.jsonl`, `*.log`, `config.ini`, `venv/` are gitignored; never commit them.

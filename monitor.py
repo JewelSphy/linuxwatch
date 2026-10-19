@@ -5,7 +5,7 @@ from twisted.internet import task, reactor, threads
 from ssh_watch import ask_ssh_permission, get_ssh_failed_interval
 from config import CPU_WARNING, CPU_CRITICAL, RAM_WARNING, DISK_WARNING, INTERVAL, SERVICES, DB_PATH
 from log_setup import setup_logging
-from alerts import stayed_high
+from alerts import check_metric
 from db import connect
 
 
@@ -170,16 +170,10 @@ def save_metrics(m):
 
 
 def check_alerts(cpu, ram, disk):
-   if stayed_high("cpu_critical", cpu, CPU_CRITICAL):
-      log.critical(f"CPU usage is too high! ({cpu}%)")
-   elif stayed_high("cpu", cpu, CPU_WARNING):
-      log.warning(f"CPU usage is high! ({cpu}%)")
-
-   if stayed_high("ram", ram, RAM_WARNING):
-      log.warning(f"RAM usage is high! ({ram}%)")
-
-   if stayed_high("disk", disk, DISK_WARNING):
-      log.warning(f"Disk space is running low! ({disk}%)")
+   check_metric("cpu_critical", cpu, CPU_CRITICAL, "critical", "CPU usage")
+   check_metric("cpu", cpu, CPU_WARNING, "warning", "CPU usage")
+   check_metric("ram", ram, RAM_WARNING, "warning", "RAM usage")
+   check_metric("disk", disk, DISK_WARNING, "warning", "Disk usage")
 
 
 def tick():
