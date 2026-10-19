@@ -3,6 +3,8 @@ config.ini
 
 # data
 *.db
+*.db-shm
+*.db-wal
 buffer.jsonl
 
 # logs
