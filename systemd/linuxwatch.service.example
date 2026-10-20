@@ -1,0 +1,19 @@
+# Sample unit running server + agent + monitor as one service.
+# Install:
+#   1. Replace YOUR_USER and /path/to/linuxwatch below.
+#   2. sudo cp linuxwatch.service.example /etc/systemd/system/linuxwatch.service
+#   3. sudo systemctl daemon-reload && sudo systemctl enable --now linuxwatch
+[Unit]
+Description=LinuxWatch (server + agent + monitor)
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/path/to/linuxwatch
+ExecStart=/path/to/linuxwatch/systemd/run-all.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

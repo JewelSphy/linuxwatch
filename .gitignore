@@ -3,6 +3,8 @@ config.ini
 
 # data
 *.db
+*.db-shm
+*.db-wal
 buffer.jsonl
 
 # logs
@@ -16,3 +18,4 @@ __pycache__/
 
 # editor
 .vscode/
+*.service

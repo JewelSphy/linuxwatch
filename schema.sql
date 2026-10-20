@@ -51,3 +51,14 @@ CREATE TABLE IF NOT EXISTS ssh_failed (
     FOREIGN KEY (metric_id) REFERENCES server_metrics(id)
 );
 
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    level TEXT NOT NULL,
+    value REAL NOT NULL,
+    threshold REAL NOT NULL,
+    fired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME,
+    resolved_value REAL
+);

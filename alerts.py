@@ -1,9 +1,9 @@
 import time
 import json
 import logging
-import sqlite3
 import urllib.request
 from config import INTERVAL, ALERT_DURATION, ALERT_COOLDOWN, DISCORD_WEBHOOK, DB_PATH
+from db import connect
 
 log = logging.getLogger("linuxwatch")
 
@@ -45,28 +45,21 @@ def send_discord(text):
 
 
 def save_alert_fired(name, level, value, threshold):
-   conn = sqlite3.connect(DB_PATH)
-   cursor = conn.cursor()
-   cursor.execute("""
-       INSERT INTO alerts (name, level, value, threshold)
-       VALUES (?, ?, ?, ?)
-   """, (name, level, value, threshold))
-   alert_id = cursor.lastrowid
-   conn.commit()
-   conn.close()
-   return alert_id
+   with connect(DB_PATH) as conn:
+      cursor = conn.execute("""
+          INSERT INTO alerts (name, level, value, threshold)
+          VALUES (?, ?, ?, ?)
+      """, (name, level, value, threshold))
+      return cursor.lastrowid
 
 
 def save_alert_resolved(alert_id, value):
-   conn = sqlite3.connect(DB_PATH)
-   cursor = conn.cursor()
-   cursor.execute("""
-       UPDATE alerts
-       SET resolved_at = CURRENT_TIMESTAMP, resolved_value = ?
-       WHERE id = ?
-   """, (value, alert_id))
-   conn.commit()
-   conn.close()
+   with connect(DB_PATH) as conn:
+      conn.execute("""
+          UPDATE alerts
+          SET resolved_at = CURRENT_TIMESTAMP, resolved_value = ?
+          WHERE id = ?
+      """, (value, alert_id))
 
 
 def check_metric(name, value, threshold, level, label):
