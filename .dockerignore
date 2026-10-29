@@ -1,4 +1,10 @@
+.git
+__pycache__
+node_modules
+.env
+venv
 config.ini
 *.db
 *.log
 buffer.jsonl
+data
