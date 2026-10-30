@@ -24,6 +24,9 @@ A self-hosted Linux server monitoring system. Lightweight Python agents collect 
 - Automatic recovery detection with `RESOLVED` messages
 - Discord webhook notifications
 - Full alert history (fired time, resolved time, values) stored in SQLite
+- **Fleet alerts:** the server checks every agent's readings, so alerts work for every node, not only the server box
+- **Node offline alerts** when an agent stops reporting
+- **Editable rules** from the dashboard: metric, limit, wait time, level, and all nodes or one node (optional admin token)
 
 **Distributed architecture**
 - Agent / server split: one agent per machine, one central API
@@ -32,14 +35,14 @@ A self-hosted Linux server monitoring system. Lightweight Python agents collect 
 
 **Live dashboard**
 - Real-time updates over WebSockets (falls back to polling)
-- Fleet overview: nodes up/down, open alerts, fleet average CPU
-- Problem banner that names the node and metric needing attention
-- Per-node CPU gauge, RAM / disk / swap / load gauges
-- Interactive charts with hover tooltips: CPU history, network in/out
-- CPU traces for every node side by side
-- Alert history with open / resolved filter and durations
-- Time ranges: 15 min, 1 h, 6 h, 24 h
-- Keyboard shortcuts: `1` / `2` switch views, `j` / `k` move between nodes, `/` filters
+- Server-rack sidebar: every node is a rack unit with status LEDs for up, CPU, RAM and disk
+- Fleet overview: KPIs, a card per node with CPU / RAM / disk bars and a CPU sparkline, latest alerts
+- **Node detail page** (`#/node/<name>`): OS, kernel, uptime, memory and disk sizes, CPU gauge, CPU history, network, per-core CPU, top processes, services, load, temperature, connections, failed SSH logins, disk forecast and the node's own alerts
+- Problem banner that names the node and problem needing attention
+- Alert history with node and open / resolved filters
+- Alert rules editor
+- Time ranges: 15 min, 1 h, 6 h, 24 h, 7 d, 30 d
+- Keyboard shortcuts: `1` / `2` / `3` switch pages, `j` / `k` move between nodes, `/` filters, `Esc` goes back
 
 **Engineering**
 - All thresholds, intervals, paths and services in one config file, no code edits needed
@@ -55,6 +58,8 @@ flowchart LR
     A1["Agent<br/>server A"] -->|"HTTPS + API key"| API
     A2["Agent<br/>server B"] -->|"HTTPS + API key"| API
     API["FastAPI server<br/>POST /metrics"] --> DB[("SQLite<br/>server.db")]
+    API --> FA["Fleet alert engine<br/>rules + offline check"]
+    FA --> D
     API -->|"WebSocket /ws"| UI["Live dashboard"]
     M["monitor.py<br/>local collector"] --> LDB[("SQLite<br/>linuxwatch.db")]
     M --> AL["Alert engine"]
@@ -68,6 +73,8 @@ flowchart LR
 | Alert engine | `alerts.py` | Duration, cooldown, Discord, fired/resolved history |
 | SSH watcher | `ssh_watch.py` | Counts failed SSH logins from `/var/log/auth.log` or `/var/log/secure` |
 | Agent | `agent.py` | Sends readings to the central server, buffers when offline |
+| Node details | `details.py` | Agent-side snapshot: OS, per-core CPU, top processes, services, temperature, SSH fails |
+| Fleet alerts | `fleet_alerts.py` | Server-side rules for every node, offline detection, `/rules` API |
 | Server | `server.py` | FastAPI: receives metrics, serves the API, WebSocket and dashboard |
 | Dashboard | `dashboard.html` | Single-page live dashboard, no build step |
 | Config | `config.ini` / `config.py` | All settings in one place, safe defaults |
@@ -133,6 +140,9 @@ cooldown = 1800     ; seconds of quiet after an alert
 [discord]
 webhook_url =       ; leave blank to disable
 
+[dashboard]
+admin_token =       ; set before going public; needed to edit alert rules
+
 [agent]
 server_url = http://localhost:8000
 api_key = <key from setup.sh>
@@ -143,6 +153,8 @@ api_key = <key from setup.sh>
 ```
 
 Each key in `[api_keys]` belongs to one host. The server rejects unknown keys with `401`.
+
+On first start the server copies the `[thresholds]` and `[alerts] duration` values into alert rules (plus an "offline for 3 intervals" rule). After that, rules are edited on the dashboard's Alert rules page.
 
 ---
 
@@ -156,7 +168,10 @@ Each key in `[api_keys]` belongs to one host. The server rejects unknown keys wi
 | `POST` | `/metrics/batch` | Agent resends buffered readings, up to 1000 per request |
 | `GET` | `/hosts` | Every host with up/down status and latest values |
 | `GET` | `/metrics?host=&minutes=` | History for one host |
-| `GET` | `/alerts?limit=` | Alert history |
+| `GET` | `/hosts/{host}/details` | Latest snapshot: OS, cores, processes, services, temperature |
+| `GET` | `/alerts?limit=&host=` | Alert history, every node |
+| `GET` | `/rules` | Alert rules |
+| `POST` / `PUT` / `DELETE` | `/rules`, `/rules/{id}` | Add, change, remove a rule (header `X-Admin-Token` when set) |
 | `GET` | `/history?host=&days=` | Hourly rollups for one host |
 | `GET` | `/prometheus` | Prometheus text metrics |
 | `GET` | `/anomalies?host=&minutes=` | Rolling z-score anomalies for one host |
