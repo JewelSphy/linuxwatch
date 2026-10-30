@@ -14,6 +14,8 @@ from db import connect, init_server_db
 import storage
 import detect
 import fleet_alerts
+import activity
+import security
 
 
 MAX_BATCH = 1000
@@ -39,6 +41,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(storage.router)
 app.include_router(detect.router)
 app.include_router(fleet_alerts.router)
+app.include_router(activity.router)
+app.include_router(security.router)
 
 init_server_db()
 
@@ -66,6 +70,18 @@ def host_for_key(api_key):
    return host
 
 
+known_hosts = set()
+
+
+def note_new_host(conn, host):
+   """Log the first reading ever from a host in the activity log."""
+   if host in known_hosts:
+      return
+   if conn.execute("SELECT 1 FROM host_metrics WHERE host = ? LIMIT 1", (host,)).fetchone() is None:
+      activity.log_event(conn, "joined", "started reporting", host, "ok")
+   known_hosts.add(host)
+
+
 def reading_row(host, r):
    return (host, r.ts, r.cpu, r.ram, r.disk, r.swap, r.load_1, r.net_in, r.net_out)
 
@@ -84,8 +100,10 @@ def health():
 def receive_metrics(reading: Reading, x_api_key: str = Header(...)):
    host = host_for_key(x_api_key)
    with connect(SERVER_DB_PATH) as conn:
+      note_new_host(conn, host)
       conn.execute(INSERT_READING, reading_row(host, reading))
       if reading.details:
+         security.record(conn, host, reading.ts, reading.details)
          conn.execute(
             "INSERT OR REPLACE INTO host_details (host, ts, data) VALUES (?, ?, ?)",
             (host, reading.ts, json.dumps(reading.details)))
@@ -99,6 +117,7 @@ def receive_batch(batch: Batch, x_api_key: str = Header(...)):
    if len(batch.readings) > MAX_BATCH:
       raise HTTPException(status_code=413, detail=f"At most {MAX_BATCH} readings per batch")
    with connect(SERVER_DB_PATH) as conn:
+      note_new_host(conn, host)
       conn.executemany(INSERT_READING, [reading_row(host, r) for r in batch.readings])
    return {"ok": True, "host": host, "stored": len(batch.readings)}
 
@@ -180,7 +199,7 @@ def monitor_alerts(limit):
       except Exception:
          # no alerts table yet (monitor.py has not created one)
          return []
-   return [dict(row, id="m" + str(row["id"]), source="monitor", host="local", unit="%") for row in rows]
+   return [dict(row, id="m" + str(row["id"]), source="monitor", host="local", unit="%", acked_at=None, muted_until=None) for row in rows]
 
 
 # one query feeds every websocket client instead of one query per client per push

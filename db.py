@@ -63,6 +63,29 @@ SERVER_SCHEMA = """
        resolved_value REAL
    );
    CREATE INDEX IF NOT EXISTS idx_fleet_open ON fleet_alerts (host, rule_id, resolved_at);
+   CREATE TABLE IF NOT EXISTS events (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       ts REAL NOT NULL,
+       kind TEXT NOT NULL,
+       level TEXT NOT NULL DEFAULT 'info',
+       host TEXT,
+       text TEXT NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS idx_events_ts ON events (ts);
+   CREATE TABLE IF NOT EXISTS ssh_failures (
+       host TEXT NOT NULL,
+       ts REAL NOT NULL,
+       ip TEXT NOT NULL,
+       user TEXT,
+       count INTEGER NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS idx_ssh_ts ON ssh_failures (ts);
+   CREATE TABLE IF NOT EXISTS alert_mutes (
+       host TEXT NOT NULL,
+       rule_id INTEGER NOT NULL,
+       until REAL NOT NULL,
+       PRIMARY KEY (host, rule_id)
+   );
 """
 
 
@@ -89,6 +112,14 @@ def connect(path):
       raise
 
 
+def add_column(conn, table, column, decl):
+   """Add a column to an existing table (older databases) if it is missing."""
+   columns = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+   if column not in columns:
+      conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 def init_server_db():
    with connect(SERVER_DB_PATH) as conn:
       conn.executescript(SERVER_SCHEMA)
+      add_column(conn, "fleet_alerts", "acked_at", "REAL")
