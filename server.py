@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import asyncio
 from contextlib import asynccontextmanager
@@ -6,11 +7,13 @@ from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconne
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
+from typing import Optional
 from pydantic import BaseModel
 from config import SERVER_DB_PATH, API_KEYS, INTERVAL, DB_PATH, BASE_DIR
 from db import connect, init_server_db
 import storage
 import detect
+import fleet_alerts
 
 
 MAX_BATCH = 1000
@@ -25,14 +28,17 @@ INSERT_READING = """
 @asynccontextmanager
 async def lifespan(app):
    stop = storage.start_cleanup()
+   stop_watch = fleet_alerts.start_offline_watch()
    yield
    stop.set()
+   stop_watch.set()
 
 
 app = FastAPI(title="LinuxWatch Server", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(storage.router)
 app.include_router(detect.router)
+app.include_router(fleet_alerts.router)
 
 init_server_db()
 
@@ -46,6 +52,7 @@ class Reading(BaseModel):
    load_1: float
    net_in: int
    net_out: int
+   details: Optional[dict] = None   # live snapshot (cores, processes, services...); never buffered
 
 
 class Batch(BaseModel):
@@ -78,6 +85,11 @@ def receive_metrics(reading: Reading, x_api_key: str = Header(...)):
    host = host_for_key(x_api_key)
    with connect(SERVER_DB_PATH) as conn:
       conn.execute(INSERT_READING, reading_row(host, reading))
+      if reading.details:
+         conn.execute(
+            "INSERT OR REPLACE INTO host_details (host, ts, data) VALUES (?, ?, ?)",
+            (host, reading.ts, json.dumps(reading.details)))
+   fleet_alerts.evaluate(host, reading.model_dump(exclude={"details"}), reading.ts)
    return {"ok": True, "host": host}
 
 
@@ -101,6 +113,7 @@ def list_hosts():
       """).fetchall()
 
    now = time.time()
+   open_alerts = fleet_alerts.open_counts()
    return [
       {
          "host": host,
@@ -109,6 +122,8 @@ def list_hosts():
          "cpu": cpu,
          "ram": ram,
          "disk": disk,
+         "open_alerts": open_alerts.get(host, {}).get("count", 0),
+         "alert_level": open_alerts.get(host, {}).get("level"),
       }
       for host, last_ts, cpu, ram, disk in rows
    ]
@@ -132,8 +147,26 @@ def get_metrics(host: str, minutes: int = 60):
    return [dict(row) for row in rows]
 
 
+@app.get("/hosts/{host}/details")
+def host_details(host: str):
+   with connect(SERVER_DB_PATH) as conn:
+      row = conn.execute("SELECT ts, data FROM host_details WHERE host = ?", (host,)).fetchone()
+   if row is None:
+      raise HTTPException(status_code=404, detail="No details yet (agent too old or not reporting)")
+   return dict(json.loads(row["data"]), host=host, ts=row["ts"], age=round(time.time() - row["ts"]))
+
+
 @app.get("/alerts")
-def list_alerts(limit: int = 50):
+def list_alerts(limit: int = 50, host: Optional[str] = None):
+   """Fleet alerts from every agent, plus monitor.py's local alerts (shown as host "local")."""
+   rows = fleet_alerts.fleet_alert_rows(limit, host)
+   if host in (None, "local"):
+      rows += monitor_alerts(limit)
+   rows.sort(key=lambda a: a["fired_at"] or "", reverse=True)
+   return rows[:limit]
+
+
+def monitor_alerts(limit):
    if not os.path.exists(DB_PATH):
       return []
    with connect(DB_PATH) as conn:
@@ -147,7 +180,7 @@ def list_alerts(limit: int = 50):
       except Exception:
          # no alerts table yet (monitor.py has not created one)
          return []
-   return [dict(row) for row in rows]
+   return [dict(row, id="m" + str(row["id"]), source="monitor", host="local", unit="%") for row in rows]
 
 
 # one query feeds every websocket client instead of one query per client per push

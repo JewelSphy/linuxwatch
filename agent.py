@@ -6,6 +6,7 @@ import psutil
 import urllib.error
 import urllib.request
 from config import AGENT_SERVER_URL, AGENT_API_KEY, INTERVAL, BUFFER_PATH
+from details import sample
 
 
 BATCH_SIZE = 500
@@ -15,7 +16,9 @@ batch_supported = True
 
 
 def collect():
+   """Return (reading, details). Only the reading is buffered; details are a live snapshot."""
    global last_net
+   cpu, details = sample(1)
    net = psutil.net_io_counters()
    if last_net is None or net.bytes_recv < last_net.bytes_recv:
       net_in, net_out = 0, 0
@@ -24,9 +27,9 @@ def collect():
       net_out = net.bytes_sent - last_net.bytes_sent
    last_net = net
 
-   return {
+   reading = {
       "ts": time.time(),
-      "cpu": psutil.cpu_percent(interval=1),
+      "cpu": cpu,
       "ram": psutil.virtual_memory().percent,
       "disk": psutil.disk_usage("/").percent,
       "swap": psutil.swap_memory().percent,
@@ -34,6 +37,7 @@ def collect():
       "net_in": net_in,
       "net_out": net_out,
    }
+   return reading, details
 
 
 def post(path, payload):
@@ -124,8 +128,8 @@ def main():
    print("LinuxWatch agent sending to", AGENT_SERVER_URL, "every", INTERVAL, "s")
    next_run = time.monotonic()
    while True:
-      reading = collect()
-      if flush_buffer() and send(reading):
+      reading, details = collect()
+      if flush_buffer() and send(dict(reading, details=details)):
          print(f"Sent: CPU {reading['cpu']}% RAM {reading['ram']}% Disk {reading['disk']}%")
       else:
          save_to_buffer(reading)

@@ -36,6 +36,33 @@ SERVER_SCHEMA = """
        net_out_sum INTEGER,
        PRIMARY KEY (host, hour)
    );
+   CREATE TABLE IF NOT EXISTS host_details (
+       host TEXT PRIMARY KEY,
+       ts REAL NOT NULL,
+       data TEXT NOT NULL
+   );
+   CREATE TABLE IF NOT EXISTS alert_rules (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       metric TEXT NOT NULL,
+       threshold REAL NOT NULL,
+       duration REAL NOT NULL DEFAULT 0,
+       level TEXT NOT NULL DEFAULT 'warning',
+       host TEXT,
+       enabled INTEGER NOT NULL DEFAULT 1
+   );
+   CREATE TABLE IF NOT EXISTS fleet_alerts (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       host TEXT NOT NULL,
+       rule_id INTEGER,
+       metric TEXT NOT NULL,
+       level TEXT NOT NULL,
+       value REAL NOT NULL,
+       threshold REAL NOT NULL,
+       fired_at REAL NOT NULL,
+       resolved_at REAL,
+       resolved_value REAL
+   );
+   CREATE INDEX IF NOT EXISTS idx_fleet_open ON fleet_alerts (host, rule_id, resolved_at);
 """
 
 

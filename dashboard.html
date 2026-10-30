@@ -6,11 +6,12 @@
 <title>LinuxWatch</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
 <style>
-/* Layout: control-room wall. Glowing square panels on deep navy; gauge + KPIs + history on top, network + per-host traces below. */
+/* Layout: a server rack on the left (every node is a rack unit with status LEDs), pages on the right.
+   Pages: overview (fleet), node (one machine in depth), alerts (history), rules (what fires an alert). */
 :root{
-  --bg:#060a1c; --bg2:#0a1030; --panel:#0b1233; --edge:#22307a; --edge-hi:#3b4fd1;
+  --bg:#060a1c; --rack:#080d26; --panel:#0b1233; --edge:#1f2c6e; --edge-hi:#3b4fd1;
   --fg:#e6ecff; --muted:#8792c4; --dim:#4b5694;
-  --cyan:#22d3ee; --magenta:#e040fb; --violet:#8b5cf6; --yellow:#fde047; --red:#fb7185; --off:#4b5694;
+  --cyan:#22d3ee; --magenta:#e040fb; --violet:#8b5cf6; --amber:#fbbf24; --red:#fb7185; --off:#4b5694;
   --label:"Rajdhani","Arial Narrow",system-ui,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
   color-scheme:dark;
@@ -19,234 +20,375 @@
 [hidden]{display:none!important}
 html,body{margin:0}
 body{
-  background:radial-gradient(1200px 600px at 70% -10%,#1a1f5c 0%,transparent 60%),radial-gradient(900px 500px at -10% 110%,#2a0f4d 0%,transparent 55%),var(--bg);
+  background:radial-gradient(1100px 560px at 75% -12%,#18205e 0%,transparent 60%),radial-gradient(800px 480px at 20% 115%,#26104a 0%,transparent 55%),var(--bg);
   color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.45;font-variant-numeric:tabular-nums;min-height:100vh;
 }
-.wrap{max-width:1400px;margin:0 auto;padding-inline:16px;padding-block:14px 32px;display:flex;flex-direction:column;gap:12px}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
+a{color:var(--cyan)}
 
-.panel{position:relative;background:linear-gradient(180deg,rgba(18,26,74,.85),rgba(11,18,51,.85));border:1px solid var(--edge);box-shadow:0 0 0 1px rgba(59,79,209,.15) inset,0 0 18px rgba(34,211,238,.06);min-width:0}
+/* ---------- app shell ---------- */
+.app{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}
+.rack{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;background:linear-gradient(180deg,rgba(8,13,38,.96),rgba(6,10,28,.96));border-right:1px solid var(--edge)}
+.brand{display:flex;align-items:baseline;justify-content:space-between;padding:16px 16px 10px}
+.brand b{font-family:var(--label);font-weight:700;font-size:24px;letter-spacing:.16em;text-shadow:0 0 14px rgba(34,211,238,.45)}
+.brand b span{color:var(--cyan)}
+.status{display:flex;align-items:center;gap:8px;padding:0 16px 12px;color:var(--muted);font-size:11px}
+.status .dot{width:7px;height:7px;background:var(--off)}
+.status.on{color:var(--cyan)}
+.status.on .dot{background:var(--cyan);box-shadow:0 0 10px var(--cyan);animation:blink 1.4s steps(2) infinite}
+@keyframes blink{50%{opacity:.25}}
+.status .clock{margin-left:auto}
+nav{display:flex;flex-direction:column;border-top:1px solid var(--edge);border-bottom:1px solid var(--edge)}
+nav a{display:flex;align-items:center;gap:10px;padding:9px 16px;text-decoration:none;color:var(--muted);font-family:var(--label);font-weight:600;font-size:15px;letter-spacing:.04em}
+nav a:hover{color:var(--fg);background:rgba(59,79,209,.1)}
+nav a[aria-current="page"]{color:var(--fg);background:rgba(34,211,238,.07);box-shadow:inset 3px 0 0 var(--cyan)}
+nav a .k{font-family:var(--mono);font-size:11px;color:var(--amber);width:12px}
+nav a .badge{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight:700;padding:0 6px;border:1px solid currentColor;color:var(--red)}
+.rackhead{display:flex;align-items:center;gap:8px;padding:12px 16px 8px;color:var(--muted);font-size:11px}
+.rackhead input{flex:1;min-width:0;background:rgba(11,18,51,.9);border:1px solid var(--edge);padding:5px 8px;font-size:12px}
+.rackhead input::placeholder{color:var(--dim)}
+.units{flex:1;overflow-y:auto;padding:0 10px 10px;display:flex;flex-direction:column;gap:4px}
+/* one rack unit per node: screws, LEDs, name, cpu meter */
+.unit{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:7px 10px;background:linear-gradient(180deg,#0e1640,#0a1031);border:1px solid var(--edge);position:relative}
+.unit::before,.unit::after{content:"";position:absolute;top:50%;width:3px;height:3px;margin-top:-1.5px;background:var(--dim)}
+.unit::before{left:3px}.unit::after{right:3px}
+.unit:hover{border-color:var(--edge-hi)}
+.unit.sel{border-color:var(--cyan);box-shadow:0 0 12px rgba(34,211,238,.18)}
+.unit:focus-visible{outline:1px solid var(--amber);outline-offset:1px}
+.leds{display:flex;gap:3px}
+.led{width:6px;height:6px;background:#1a2560}
+.led.ok{background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+.led.warn{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+.led.crit{background:var(--red);box-shadow:0 0 6px var(--red);animation:blink 1s steps(2) infinite}
+.unit .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.unit .pc{font-size:11px;color:var(--muted)}
+.unit .meter{grid-column:1/-1;height:2px;background:#16205a}
+.unit .meter i{display:block;height:100%}
+.rackfoot{padding:10px 16px;border-top:1px solid var(--edge);color:var(--dim);font-size:11px}
+
+.main{min-width:0;padding:16px 20px 32px;display:flex;flex-direction:column;gap:14px}
+.pagehead{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 18px}
+.pagehead h1{margin:0;font-family:var(--label);font-weight:700;font-size:30px;line-height:1;letter-spacing:.02em}
+.pagehead .sub{color:var(--muted);font-size:12px}
+.spacer{flex:1}
+.seg{display:flex}
+.seg button{background:rgba(11,18,51,.9);border:1px solid var(--edge);padding:6px 11px;min-height:32px;cursor:pointer;font-size:12px}
+.seg button+button{border-left:0}
+.seg button:hover{border-color:var(--edge-hi)}
+.seg button[aria-pressed="true"]{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 10px rgba(34,211,238,.22) inset}
+
+/* ---------- panels ---------- */
+.panel{position:relative;background:linear-gradient(180deg,rgba(17,25,72,.82),rgba(11,18,51,.82));border:1px solid var(--edge);box-shadow:0 0 0 1px rgba(59,79,209,.12) inset;min-width:0}
 .panel::before,.panel::after{content:"";position:absolute;width:10px;height:10px;border-color:var(--cyan);border-style:solid;pointer-events:none}
 .panel::before{top:-1px;left:-1px;border-width:2px 0 0 2px}
 .panel::after{bottom:-1px;right:-1px;border-width:0 2px 2px 0}
-.ph{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--edge)}
-.ph .t{font-family:var(--label);font-weight:700;font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg)}
+.ph{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--edge)}
+.ph h2{margin:0;font-family:var(--label);font-weight:700;font-size:16px;letter-spacing:.04em}
 .ph .m{color:var(--muted);font-size:11px}
 .pb{padding:12px}
-
-/* top bar */
-.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:10px 14px}
-.brand{font-family:var(--label);font-weight:700;font-size:22px;letter-spacing:.2em;color:var(--fg);text-shadow:0 0 12px rgba(34,211,238,.5)}
-.brand span{color:var(--cyan)}
-.ticker{flex:1;min-width:200px;display:flex;gap:6px;align-items:center}
-.ticker i{height:3px;flex:1;background:linear-gradient(90deg,var(--cyan),var(--violet));opacity:.35}
-.ticker i:nth-child(3n){opacity:.9;box-shadow:0 0 8px var(--cyan)}
-.live{display:flex;align-items:center;gap:8px;font-family:var(--label);font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
-.live .dot{width:8px;height:8px;background:var(--off)}
-.live.on{color:var(--cyan)}
-.live.on .dot{background:var(--cyan);box-shadow:0 0 10px var(--cyan);animation:blink 1.4s steps(2) infinite}
-@keyframes blink{50%{opacity:.25}}
-.clock{color:var(--muted)}
-
-/* controls */
-.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.btn,.seg button,.tab{font:inherit;font-size:12px;color:var(--fg);background:rgba(11,18,51,.9);border:1px solid var(--edge);padding:7px 12px;min-height:34px;cursor:pointer;letter-spacing:.04em}
-.btn:hover,.seg button:hover,.tab:hover{border-color:var(--edge-hi)}
-.tab[aria-selected="true"],.seg button[aria-pressed="true"]{border-color:var(--cyan);color:var(--cyan);box-shadow:0 0 10px rgba(34,211,238,.25) inset}
-.seg{display:flex}
-.seg button+button{border-left:0}
-.key{color:var(--yellow)}
-.spacer{flex:1}
-input[type=search]{font:inherit;font-size:12px;color:var(--fg);background:rgba(11,18,51,.9);border:1px solid var(--edge);padding:7px 10px;min-height:34px;width:190px}
-input::placeholder{color:var(--dim)}
-:focus-visible{outline:1px solid var(--yellow);outline-offset:2px}
-
-/* grid */
-.row{display:grid;gap:12px}
-.row1{grid-template-columns:minmax(0,1.05fr) minmax(0,1.6fr) minmax(0,1.15fr)}
-.row2{grid-template-columns:minmax(0,2.2fr) minmax(0,1fr)}
-@media (max-width:1100px){.row1{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.row1 > :last-child{grid-column:1/-1}.row2{grid-template-columns:minmax(0,1fr)}}
-@media (max-width:700px){.row1{grid-template-columns:minmax(0,1fr)}}
-
-/* gauge panel */
-.gauge{display:flex;justify-content:center;padding:8px 0 4px}
-.gauge svg{width:230px;max-width:100%;height:auto}
-.gauge text{font-family:var(--mono)}
-.minis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;border-top:1px solid var(--edge);padding:12px}
-.mini{display:flex;flex-direction:column;align-items:center;gap:4px}
-.mini svg{width:58px;height:58px}
-.mini .lb{font-family:var(--label);font-weight:600;font-size:11px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+.empty{padding:22px 12px;color:var(--muted)}
+.grid{display:grid;gap:14px}
+.g3{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) minmax(0,1fr)}
+.g2{grid-template-columns:minmax(0,1.7fr) minmax(0,1fr)}
+.g2e{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}
+@media (max-width:1180px){.g3{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.g3>:nth-child(2){grid-column:1/-1;order:3}}
+@media (max-width:900px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .rack{position:static;height:auto}
+  nav{flex-direction:row;overflow-x:auto}
+  nav a{flex:1;justify-content:center;padding:9px 10px}
+  nav a[aria-current="page"]{box-shadow:inset 0 -2px 0 var(--cyan)}
+  .rackhead,.units,.rackfoot{display:none}
+  .main{padding:14px 16px 28px}
+  .g3,.g2,.g2e{grid-template-columns:minmax(0,1fr)}
+  .g3>:nth-child(2){grid-column:auto}
+}
 
 /* kpis */
-.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-bottom:1px solid var(--edge)}
-.kpis .kpi .v{font-size:26px}
-@media (max-width:560px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
-.kpi .s{color:var(--muted);font-size:11px;margin-top:2px;overflow-wrap:anywhere}
-.c-muted{color:var(--muted)}
-.kpi{padding:12px;border-right:1px solid var(--edge)}
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr))}
+.kpi{padding:12px 14px;border-right:1px solid var(--edge)}
 .kpi:last-child{border-right:0}
-.kpi .v{font-size:30px;font-weight:700;line-height:1.05}
-.kpi .k{font-family:var(--label);font-weight:600;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:4px}
-.c-cyan{color:var(--cyan);text-shadow:0 0 14px rgba(34,211,238,.45)}
-.c-yellow{color:var(--yellow);text-shadow:0 0 14px rgba(253,224,71,.4)}
-.c-mag{color:var(--magenta);text-shadow:0 0 14px rgba(224,64,251,.45)}
-.c-red{color:var(--red);text-shadow:0 0 14px rgba(251,113,133,.45)}
-.histhead{display:flex;justify-content:space-between;align-items:baseline;padding:10px 12px 0}
-.histhead .big{font-size:34px;font-weight:700}
-.histhead .sub{color:var(--muted);font-size:11px}
-.hist svg{display:block;width:100%;height:auto}
-.axis{font-family:var(--mono);font-size:10px;fill:var(--muted)}
+.kpi .v{font-size:28px;font-weight:700;line-height:1.05}
+.kpi .k{color:var(--muted);font-size:11px;margin-top:4px}
+.kpi .s{color:var(--dim);font-size:11px;margin-top:2px;overflow-wrap:anywhere}
+@media (max-width:1100px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.kpi:nth-child(3){border-right:0}.kpi:nth-child(-n+3){border-bottom:1px solid var(--edge)}}
+.c-cyan{color:var(--cyan);text-shadow:0 0 14px rgba(34,211,238,.4)}
+.c-amber{color:var(--amber);text-shadow:0 0 14px rgba(251,191,36,.35)}
+.c-mag{color:var(--magenta);text-shadow:0 0 14px rgba(224,64,251,.4)}
+.c-red{color:var(--red);text-shadow:0 0 14px rgba(251,113,133,.4)}
+.c-muted{color:var(--muted)}
 
-/* nodes */
-.nodes{display:flex;flex-direction:column}
-.node{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--edge)}
-.node:last-child{border-bottom:0}
-.node:hover{background:rgba(59,79,209,.12)}
-.node.sel{background:rgba(34,211,238,.08);box-shadow:inset 3px 0 0 var(--cyan)}
-.node:focus-visible{outline:1px solid var(--yellow);outline-offset:-2px}
-.lamp{width:10px;height:10px}
+/* node cards on overview */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.card{appearance:none;text-align:left;font:inherit;color:inherit;width:100%;cursor:pointer;display:flex;flex-direction:column;gap:10px;padding:12px 14px}
+.card:hover{border-color:var(--edge-hi)}
+.card:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
+.card .top{display:flex;align-items:center;gap:10px}
+.card .name{font-family:var(--label);font-weight:700;font-size:19px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .seen{color:var(--muted);font-size:11px}
+.card .alert{margin-left:auto;font-size:11px;font-weight:700;padding:1px 7px;border:1px solid currentColor;white-space:nowrap}
+.lamp{flex:none;width:10px;height:10px;background:var(--off)}
 .lamp.ok{background:var(--cyan);box-shadow:0 0 10px var(--cyan)}
-.lamp.warn{background:var(--yellow);box-shadow:0 0 10px var(--yellow)}
+.lamp.warn{background:var(--amber);box-shadow:0 0 10px var(--amber)}
 .lamp.crit{background:var(--red);box-shadow:0 0 10px var(--red)}
-.lamp.down{background:var(--off)}
-.nname{font-weight:500;overflow-wrap:anywhere}
-.nsub{color:var(--muted);font-size:11px}
-.nvals{display:flex;gap:10px;font-size:12px}
-.nvals b{font-weight:500}
-.nvals .u{color:var(--dim)}
-.empty{padding:24px 12px;color:var(--muted)}
+.bars{display:grid;grid-template-columns:34px minmax(0,1fr) 38px;gap:6px 8px;align-items:center;font-size:11px}
+.bars .l{color:var(--muted)}
+.bars .t{height:6px;background:#16205a;position:relative}
+.bars .t i{position:absolute;inset:0 auto 0 0}
+.bars .n{text-align:right}
+.card svg{display:block;width:100%;height:34px}
 
-/* network */
-.net svg{display:block;width:100%;height:auto}
-.legend{display:flex;gap:16px;font-size:11px;color:var(--muted)}
-.legend span::before{content:"";display:inline-block;width:14px;height:3px;margin-right:6px;vertical-align:middle;background:currentColor}
-
-/* traces */
-.traces{display:flex;flex-direction:column}
-.trace{display:grid;grid-template-columns:minmax(0,1fr) 120px 48px;gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--edge)}
-.trace:last-child{border-bottom:0}
-.trace svg{width:120px;height:30px;display:block}
-
-/* alerts */
-.tbl{overflow-x:auto}
-table{width:100%;border-collapse:collapse;min-width:680px}
-th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--edge);white-space:nowrap}
-th{font-family:var(--label);font-weight:600;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
-td.n,th.n{text-align:right}
-.tag{font-weight:700;font-size:11px;letter-spacing:.06em;padding:2px 8px;border:1px solid currentColor}
-.foot{display:flex;flex-wrap:wrap;gap:16px;color:var(--dim);font-size:11px}
-
-/* problem banner */
-.banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;padding:10px 14px;border:1px solid var(--red);background:linear-gradient(90deg,rgba(251,113,133,.14),rgba(251,113,133,.03));box-shadow:0 0 18px rgba(251,113,133,.15)}
-.banner.warn{border-color:var(--yellow);background:linear-gradient(90deg,rgba(253,224,71,.12),rgba(253,224,71,.02));box-shadow:0 0 18px rgba(253,224,71,.12)}
-.banner .bt{font-family:var(--label);font-weight:700;letter-spacing:.14em;text-transform:uppercase}
-.banner .item{all:unset;cursor:pointer;font-size:12px;padding:2px 0;border-bottom:1px dashed transparent}
-.banner .item:hover{border-bottom-color:currentColor}
-.banner .item:focus-visible{outline:1px solid var(--yellow);outline-offset:2px}
-
-/* interactivity */
-#tip{position:fixed;z-index:10;pointer-events:none;background:#050817;border:1px solid var(--cyan);box-shadow:0 0 14px rgba(34,211,238,.35);padding:6px 10px;font-size:12px;white-space:pre;color:var(--fg)}
-.b .bar{transition:opacity .1s}
-.b:hover .bar{opacity:1!important;fill:var(--yellow);filter:url(#glow)}
-.b .hit,.s .hit{fill:transparent;cursor:crosshair}
-.s .xh{opacity:0}
-.s:hover .xh{opacity:1}
-.legend button{font:inherit;font-size:11px;background:none;border:1px solid transparent;color:var(--muted);padding:2px 8px;cursor:pointer}
+/* charts */
+.chart svg{display:block;width:100%;height:auto}
+.axis{font-family:var(--mono);font-size:10px;fill:var(--muted)}
+.histhead{display:flex;justify-content:space-between;align-items:baseline;padding:10px 12px 0}
+.histhead .big{font-size:32px;font-weight:700}
+.histhead .sub{color:var(--muted);font-size:11px}
+.legend{display:flex;gap:4px}
+.legend button{background:none;border:1px solid transparent;color:var(--muted);padding:2px 8px;cursor:pointer;font-size:11px}
 .legend button::before{content:"";display:inline-block;width:14px;height:3px;margin-right:6px;vertical-align:middle;background:currentColor}
 .legend button[aria-pressed="false"]{opacity:.35;text-decoration:line-through}
 .legend button:hover{border-color:var(--edge)}
-.trace{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) 120px 48px;gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--edge)}
+.b .bar{transition:opacity .1s}
+.b:hover .bar{opacity:1!important;fill:var(--amber)}
+.b .hit,.s .hit{fill:transparent;cursor:crosshair}
+.s .xh{opacity:0}
+.s:hover .xh{opacity:1}
+
+/* traces */
+.trace{all:unset;box-sizing:border-box;width:100%;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) 120px 48px;gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--edge)}
+.trace:last-child{border-bottom:0}
 .trace:hover{background:rgba(59,79,209,.12)}
-.trace.sel{box-shadow:inset 3px 0 0 var(--cyan)}
-.trace:focus-visible{outline:1px solid var(--yellow);outline-offset:-2px}
-@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+.trace svg{width:120px;height:30px;display:block}
+.trace:focus-visible{outline:1px solid var(--amber);outline-offset:-2px}
+.nname{overflow-wrap:anywhere}
+
+/* node page */
+.nodehead{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 16px;align-items:center;padding:16px 18px}
+.nodehead .lamp{width:14px;height:14px;grid-row:1/3}
+.nodehead h1{margin:0;font-family:var(--label);font-weight:700;font-size:40px;line-height:1;letter-spacing:.02em;overflow-wrap:anywhere}
+.nodehead .os{color:var(--muted);font-size:12px}
+.facts{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--edge)}
+.fact .v{font-size:15px;font-weight:500}
+.fact .k{color:var(--muted);font-size:11px}
+.back{color:var(--muted);text-decoration:none;font-size:12px}
+.back:hover{color:var(--fg)}
+.gauge{display:flex;justify-content:center;padding:10px 0 4px}
+.gauge svg{width:210px;max-width:100%;height:auto}
+.minis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;border-top:1px solid var(--edge);padding:12px}
+.mini{display:flex;flex-direction:column;align-items:center;gap:4px}
+.mini svg{width:56px;height:56px}
+.mini .lb{color:var(--muted);font-size:11px}
+.syslist{display:grid;grid-template-columns:minmax(0,1fr) auto;margin:0}
+.syslist dt,.syslist dd{padding:8px 12px;border-bottom:1px solid var(--edge);margin:0}
+.syslist dt{color:var(--muted);white-space:nowrap}
+.syslist dd{text-align:right}
+.syslist dt:last-of-type,.syslist dd:last-of-type{border-bottom:0}
+.cores{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 14px;padding:12px}
+.core{display:grid;grid-template-columns:28px minmax(0,1fr) 36px;gap:8px;align-items:center;font-size:11px}
+.core .l{color:var(--muted)}
+.core .t{height:8px;background:#16205a;position:relative}
+.core .t i{position:absolute;inset:0 auto 0 0}
+.core .n{text-align:right}
+.svc{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--edge)}
+.svc:last-child{border-bottom:0}
+.svc .st{margin-left:auto;font-size:11px}
+.note{padding:12px;color:var(--muted);font-size:12px}
+
+/* tables */
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--edge);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+th{color:var(--muted);font-weight:500;font-size:11px}
+td.n,th.n{text-align:right}
+.alerts-table{min-width:760px}
+.tag{font-weight:700;font-size:11px;padding:1px 7px;border:1px solid currentColor}
+.pbar{display:inline-block;width:60px;height:5px;background:#16205a;vertical-align:middle;margin-left:8px;position:relative}
+.pbar i{position:absolute;inset:0 auto 0 0;background:var(--cyan)}
+.hostlink{all:unset;cursor:pointer;border-bottom:1px dashed var(--dim)}
+.hostlink:hover{color:var(--cyan);border-color:var(--cyan)}
+.hostlink:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+select,.field{background:rgba(11,18,51,.95);border:1px solid var(--edge);padding:5px 8px;min-height:32px;font-size:12px}
+select:hover,.field:hover{border-color:var(--edge-hi)}
+.mini-list .row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--edge);font-size:12px}
+.mini-list .row:last-child{border-bottom:0}
+.mini-list .when{color:var(--muted);font-size:11px}
+
+/* rules */
+.rules-table{min-width:820px}
+.rules-table td{padding:6px 8px}
+.rules-table input[type=number]{width:84px}
+.rules-table .unit-l{color:var(--muted);margin-left:4px}
+.rules-table tr.off td{opacity:.45}
+.rules-table tr.dirty td:first-child{box-shadow:inset 3px 0 0 var(--amber)}
+.btn{background:rgba(11,18,51,.95);border:1px solid var(--edge);padding:5px 12px;min-height:32px;cursor:pointer;font-size:12px}
+.btn:hover{border-color:var(--edge-hi)}
+.btn.primary{border-color:var(--cyan);color:var(--cyan)}
+.btn.danger:hover{border-color:var(--red);color:var(--red)}
+.btn:disabled{opacity:.4;cursor:default}
+.check{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.check input{accent-color:#22d3ee;width:15px;height:15px}
+.msg{font-size:12px;min-height:18px}
+.msg.err{color:var(--red)}
+.msg.ok{color:var(--cyan)}
+.explain{color:var(--muted);font-size:12px;max-width:75ch;margin:0}
+
+/* problem banner */
+.banner{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding:9px 14px;border:1px solid var(--red);background:linear-gradient(90deg,rgba(251,113,133,.14),rgba(251,113,133,.03))}
+.banner.warn{border-color:var(--amber);background:linear-gradient(90deg,rgba(251,191,36,.12),rgba(251,191,36,.02))}
+.banner .bt{font-family:var(--label);font-weight:700;font-size:15px}
+.banner .item{all:unset;cursor:pointer;font-size:12px;border-bottom:1px dashed transparent}
+.banner .item:hover{border-bottom-color:currentColor}
+.banner .item:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
+
+#tip{position:fixed;z-index:10;pointer-events:none;background:#050817;border:1px solid var(--cyan);box-shadow:0 0 14px rgba(34,211,238,.3);padding:6px 10px;font-size:12px;white-space:pre;color:var(--fg)}
+.foot{color:var(--dim);font-size:11px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="app">
 
-  <header class="panel top">
-    <div class="brand">LINUX<span>WATCH</span></div>
-    <div class="ticker" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-    <span class="clock" id="clock">--:--:--</span>
-    <span class="live" id="live"><span class="dot"></span><span id="liveText">connecting</span></span>
-  </header>
+  <aside class="rack">
+    <div class="brand"><b>LINUX<span>WATCH</span></b></div>
+    <div class="status" id="live"><span class="dot"></span><span id="liveText">connecting</span><span class="clock" id="clock">--:--:--</span></div>
+    <nav aria-label="Pages">
+      <a href="#/" data-view="overview"><span class="k">1</span>Overview</a>
+      <a href="#/alerts" data-view="alerts"><span class="k">2</span>Alerts<span class="badge" id="navBadge" hidden></span></a>
+      <a href="#/rules" data-view="rules"><span class="k">3</span>Alert rules</a>
+    </nav>
+    <div class="rackhead"><label for="filter">Nodes</label><input type="search" id="filter" placeholder="filter  /" autocomplete="off"></div>
+    <div class="units" id="units"><div class="empty">Waiting for the first agent to report.</div></div>
+    <div class="rackfoot" id="mode">j / k moves between nodes</div>
+  </aside>
 
-  <div class="banner" id="banner" role="alert" hidden></div>
+  <main class="main">
+    <div class="banner" id="banner" role="alert" hidden></div>
 
-  <div class="controls">
-    <div role="tablist" style="display:flex;gap:8px">
-      <button class="tab" role="tab" id="tab-ops" aria-selected="true"><span class="key">1</span> overview</button>
-      <button class="tab" role="tab" id="tab-alerts" aria-selected="false"><span class="key">2</span> alerts</button>
-    </div>
-    <span class="spacer"></span>
-    <label for="filter" style="color:var(--muted);font-size:12px">filter <span class="key">/</span></label>
-    <input type="search" id="filter" placeholder="host name…" autocomplete="off">
-    <div class="seg" id="range" role="group" aria-label="Time range">
-      <button data-min="15" aria-pressed="false">15m</button>
-      <button data-min="60" aria-pressed="true">1h</button>
-      <button data-min="360" aria-pressed="false">6h</button>
-      <button data-min="1440" aria-pressed="false">24h</button>
-      <button data-min="10080" aria-pressed="false">7d</button>
-      <button data-min="43200" aria-pressed="false">30d</button>
-    </div>
-  </div>
-
-  <section id="view-ops" style="display:flex;flex-direction:column;gap:12px">
-    <div class="row row1">
-
-      <div class="panel">
-        <div class="ph"><span class="t" id="gTitle">host</span><span class="m" id="gSub">select a node</span></div>
-        <div class="gauge" id="gauge"></div>
-        <div class="minis" id="minis"></div>
+    <!-- overview -->
+    <section id="view-overview" class="grid">
+      <div class="pagehead">
+        <h1>Fleet overview</h1><span class="sub" id="ovSub"></span>
+        <span class="spacer"></span>
+        <div class="seg range" role="group" aria-label="Time range"></div>
       </div>
-
-      <div class="panel">
-        <div class="kpis">
-          <div class="kpi"><div class="v c-cyan" id="kUp">0</div><div class="k">nodes up</div></div>
-          <div class="kpi"><div class="v" id="kDown">0</div><div class="k">nodes down</div></div>
-          <div class="kpi"><div class="v c-mag" id="kAlerts">0</div><div class="k">open alerts</div></div>
-          <div class="kpi"><div class="v c-yellow" id="kAvg">0%</div><div class="k">fleet avg cpu</div></div>
-          <div class="kpi" data-tip="Linear trend of disk usage over the last 7 days"><div class="v c-muted" id="kDisk">—</div><div class="k">disk full in</div><div class="s" id="kDiskSub">learning…</div></div>
+      <div class="panel kpis">
+        <div class="kpi"><div class="v c-cyan" id="kUp">0</div><div class="k">nodes up</div></div>
+        <div class="kpi"><div class="v" id="kDown">0</div><div class="k">nodes down</div></div>
+        <div class="kpi"><div class="v c-mag" id="kAlerts">0</div><div class="k">open alerts</div></div>
+        <div class="kpi"><div class="v" id="kCpu">0%</div><div class="k">average CPU</div></div>
+        <div class="kpi"><div class="v" id="kRam">0%</div><div class="k">average RAM</div></div>
+        <div class="kpi" data-tip="Linear trend of disk usage over the last 7 days"><div class="v c-muted" id="kDisk">—</div><div class="k">first disk full in</div><div class="s" id="kDiskSub">learning</div></div>
+      </div>
+      <div class="cards" id="cards"></div>
+      <div class="grid g2e">
+        <div class="panel">
+          <div class="ph"><h2>CPU traces</h2><span class="m" id="tSub"></span></div>
+          <div id="traces"></div>
         </div>
-        <div class="histhead"><div><div class="ph" style="padding:0;border:0"><span class="t">cpu history</span></div><div class="sub" id="hSub">selected node</div></div><div class="big c-yellow" id="hPeak">—</div></div>
-        <div class="hist pb" id="hist"></div>
-      </div>
-
-      <div class="panel">
-        <div class="ph"><span class="t">nodes</span><span class="m">j / k · enter</span></div>
-        <div class="nodes" id="nodes"><div class="empty">waiting for the first agent…</div></div>
-      </div>
-    </div>
-
-    <div class="row row2">
-      <div class="panel">
-        <div class="ph"><span class="t">network</span><div class="legend" id="legend"><button data-k="in" aria-pressed="true" style="color:var(--cyan)">in</button><button data-k="out" aria-pressed="true" style="color:var(--magenta)">out</button></div></div>
-        <div class="net pb" id="net"></div>
-      </div>
-      <div class="panel">
-        <div class="ph"><span class="t">cpu traces</span><span class="m" id="tSub">all nodes · 1 h</span></div>
-        <div class="traces" id="traces"></div>
-      </div>
-    </div>
-  </section>
-
-  <section id="view-alerts" hidden>
-    <div class="panel">
-      <div class="ph"><span class="t">alert history</span>
-        <div class="seg" id="alertFilter" role="group" aria-label="Alert filter">
-          <button data-f="all" aria-pressed="true">all</button>
-          <button data-f="open" aria-pressed="false">open</button>
-          <button data-f="resolved" aria-pressed="false">resolved</button>
+        <div class="panel">
+          <div class="ph"><h2>Latest alerts</h2><a class="m" href="#/alerts">see all</a></div>
+          <div class="mini-list" id="recent"></div>
         </div>
       </div>
-      <div class="tbl"><table>
-        <thead><tr><th>#</th><th>level</th><th>metric</th><th class="n">value</th><th class="n">limit</th><th>fired (utc)</th><th>resolved (utc)</th><th class="n">duration</th></tr></thead>
-        <tbody id="alertRows"></tbody>
-      </table></div>
-    </div>
-  </section>
+    </section>
 
-  <div class="foot"><span>warn ≥ 70% · crit ≥ 85% · dashed line = alert limit · hover charts for values</span><span id="mode"></span></div>
+    <!-- node -->
+    <section id="view-node" class="grid" hidden>
+      <div class="pagehead">
+        <a class="back" href="#/">← fleet overview</a>
+        <span class="spacer"></span>
+        <div class="seg range" role="group" aria-label="Time range"></div>
+      </div>
+      <div class="panel nodehead" id="nodeHead"></div>
+      <div class="grid g3">
+        <div class="panel">
+          <div class="ph"><h2>Right now</h2><span class="m" id="gSub"></span></div>
+          <div class="gauge" id="gauge"></div>
+          <div class="minis" id="minis"></div>
+        </div>
+        <div class="panel">
+          <div class="histhead"><div><div class="ph" style="padding:0;border:0"><h2>CPU history</h2></div><div class="sub" id="hSub"></div></div><div class="big" id="hPeak">—</div></div>
+          <div class="chart pb" id="hist"></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>System</h2><span class="m" id="sysAge"></span></div>
+          <dl class="syslist" id="sys"></dl>
+        </div>
+      </div>
+      <div class="grid g2">
+        <div class="panel">
+          <div class="ph"><h2>Network</h2><div class="legend" id="legend"><button data-k="in" aria-pressed="true" style="color:var(--cyan)">in</button><button data-k="out" aria-pressed="true" style="color:var(--magenta)">out</button></div></div>
+          <div class="chart pb" id="net"></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>CPU cores</h2><span class="m" id="coreSub"></span></div>
+          <div class="cores" id="cores"></div>
+        </div>
+      </div>
+      <div class="grid g2">
+        <div class="panel">
+          <div class="ph"><h2>Top processes</h2><span class="m">by CPU</span></div>
+          <div class="tbl"><table><thead><tr><th class="n">pid</th><th>name</th><th>user</th><th class="n">cpu</th><th class="n">memory</th></tr></thead><tbody id="procs"></tbody></table></div>
+        </div>
+        <div class="grid" style="align-content:start">
+          <div class="panel">
+            <div class="ph"><h2>Services</h2><span class="m" id="svcSub"></span></div>
+            <div id="svcs"></div>
+          </div>
+          <div class="panel">
+            <div class="ph"><h2>Alerts on this node</h2><a class="m" id="nodeAlertsLink" href="#/alerts">see all</a></div>
+            <div class="mini-list" id="nodeAlerts"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- alerts -->
+    <section id="view-alerts" class="grid" hidden>
+      <div class="pagehead"><h1>Alerts</h1><span class="sub">every alert from every node, newest first</span></div>
+      <div class="panel">
+        <div class="ph">
+          <div class="filters">
+            <div class="seg" id="alertFilter" role="group" aria-label="Alert state">
+              <button data-f="all" aria-pressed="true">all</button>
+              <button data-f="open" aria-pressed="false">open</button>
+              <button data-f="resolved" aria-pressed="false">resolved</button>
+            </div>
+            <label class="sr" for="alertHost" hidden>Node</label>
+            <select id="alertHost" aria-label="Node"><option value="">all nodes</option></select>
+          </div>
+          <span class="m" id="alertCount"></span>
+        </div>
+        <div class="tbl"><table class="alerts-table">
+          <thead><tr><th>state</th><th>node</th><th>metric</th><th class="n">value</th><th class="n">limit</th><th>fired (utc)</th><th>resolved (utc)</th><th class="n">lasted</th></tr></thead>
+          <tbody id="alertRows"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- rules -->
+    <section id="view-rules" class="grid" hidden>
+      <div class="pagehead"><h1>Alert rules</h1></div>
+      <p class="explain">An alert fires when a node stays at or above the limit for the whole wait time, and resolves by itself once the value drops back. Each alert is sent to Discord once when it fires and once when it resolves. Rules apply to every node unless you pick one.</p>
+      <div class="filters" id="tokenRow" hidden>
+        <label for="token" class="c-muted">Admin token</label>
+        <input class="field" id="token" type="password" autocomplete="off" placeholder="from config.ini [dashboard]">
+      </div>
+      <div class="panel">
+        <div class="tbl"><table class="rules-table">
+          <thead><tr><th>on</th><th>metric</th><th>limit</th><th>wait</th><th>level</th><th>node</th><th></th></tr></thead>
+          <tbody id="ruleRows"></tbody>
+        </table></div>
+      </div>
+      <div class="filters"><button class="btn primary" id="addRule">Add rule</button><span class="msg" id="ruleMsg" role="status"></span></div>
+    </section>
+
+    <div class="foot" id="foot">Colors: cyan normal, amber at 70% or more, red at 85% or more. The dashed line on charts is the alert limit. Hover any chart for values.</div>
+  </main>
 </div>
 <div id="tip" hidden></div>
 
@@ -255,39 +397,36 @@ td.n,th.n{text-align:right}
   "use strict";
 
   /* ---------------- config ---------------- */
-  var LIMITS = { cpu: 80, ram: 85, disk: 90, swap: 50 };
   var WARN = 70, CRIT = 85;
-  var COL = { cyan: "#22d3ee", magenta: "#e040fb", violet: "#8b5cf6", yellow: "#fde047", red: "#fb7185", off: "#4b5694", edge: "#22307a", grid: "#1a2560", muted: "#8792c4", fg: "#e6ecff" };
+  var RANGES = [[15, "15m"], [60, "1h"], [360, "6h"], [1440, "24h"], [10080, "7d"], [43200, "30d"]];
+  var COL = { cyan: "#22d3ee", magenta: "#e040fb", violet: "#8b5cf6", amber: "#fbbf24", red: "#fb7185", off: "#4b5694", edge: "#1f2c6e", grid: "#1a2560", muted: "#8792c4", fg: "#e6ecff" };
+  var METRIC_FALLBACK = { cpu: { label: "CPU", unit: "%" }, ram: { label: "RAM", unit: "%" }, disk: { label: "Disk", unit: "%" }, swap: { label: "Swap", unit: "%" }, load_1: { label: "Load (1 min)", unit: "" }, offline: { label: "Offline", unit: "s" } };
 
   /* ---------------- state ---------------- */
-  var state = { demo: false, hosts: [], alerts: [], selected: null, minutes: 60, filter: "", alertFilter: "all", view: "ops", traces: {}, rows: [], net: { in: true, out: true }, anoms: [], anomNow: [], forecast: [] };
+  var state = {
+    demo: false, hosts: [], alerts: [], rules: { metrics: METRIC_FALLBACK, rules: [], protected: false },
+    view: "overview", selected: null, minutes: 60, filter: "", alertFilter: "all", alertHost: "",
+    traces: {}, rows: [], net: { in: true, out: true }, anoms: [], anomNow: [], forecast: [], details: null, nodeAlerts: []
+  };
 
   /* ---------------- helpers ---------------- */
   var $ = function (id) { return document.getElementById(id); };
-  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function clamp(v) { return Math.max(0, Math.min(100, v || 0)); }
   function level(v) { return v >= CRIT ? "crit" : (v >= WARN ? "warn" : "ok"); }
-  function levelColor(v) { return { ok: COL.cyan, warn: COL.yellow, crit: COL.red }[level(v)]; }
-  function hostLevel(h) { return h.status !== "up" ? "down" : level(Math.max(h.cpu, h.ram, h.disk)); }
-  function fmtAgo(s) { return s < 90 ? Math.round(s) + "s" : (s < 5400 ? Math.round(s / 60) + "m" : Math.round(s / 3600) + "h"); }
-  function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + "M" : (n >= 1024 ? Math.round(n / 1024) + "K" : Math.round(n) + "B"); }
-  function rangeLabel(m) { return m < 60 ? m + " min" : (m < 2880 ? (m / 60) + " h" : (m / 1440) + " d"); }
-
-  /* ranges over 24 h read the hourly rollups from /history (storage.py) */
-  function fetchRows(host) {
-    var m = state.minutes;
-    if (m <= 1440) {
-      return api("/metrics?host=" + encodeURIComponent(host) + "&minutes=" + m, function () { return demo.metrics(host, m); });
-    }
-    return api("/history?host=" + encodeURIComponent(host) + "&days=" + Math.round(m / 1440), function () { return []; })
-      .then(function (list) {
-        if (state.demo) return demo.metrics(host, m);
-        return list.map(function (h) {
-          return { ts: h.hour + 1800, cpu: h.cpu_avg, cpu_max: h.cpu_max, ram: h.ram_avg, disk: h.disk_avg,
-                   swap: h.swap_avg, load_1: h.load_avg, net_in: h.net_in_sum, net_out: h.net_out_sum };
-        });
-      });
+  function levelColor(v) { return { ok: COL.cyan, warn: COL.amber, crit: COL.red }[level(v)]; }
+  function levelClass(v) { return { ok: "c-cyan", warn: "c-amber", crit: "c-red" }[level(v)]; }
+  function hostLevel(h) {
+    if (h.status !== "up") return "down";
+    if (h.alert_level === "critical") return "crit";
+    var v = level(Math.max(h.cpu, h.ram, h.disk));
+    return h.alert_level === "warning" && v === "ok" ? "warn" : v;
   }
+  function fmtAgo(s) { return s < 90 ? Math.round(s) + "s" : (s < 5400 ? Math.round(s / 60) + "m" : (s < 172800 ? Math.round(s / 3600) + "h" : Math.round(s / 86400) + "d")); }
+  function fmtBytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + "G" : n >= 1048576 ? (n / 1048576).toFixed(1) + "M" : (n >= 1024 ? Math.round(n / 1024) + "K" : Math.round(n) + "B"); }
+  function fmtUptime(s) { var d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? d + "d " + h + "h" : (h ? h + "h " + m + "m" : m + "m"); }
+  function fmtDays(d) { return d < 1 ? Math.round(d * 24) + " h" : (d < 365 ? d.toFixed(d < 10 ? 1 : 0) + " days" : "over a year"); }
+  function rangeLabel(m) { return m < 60 ? m + " min" : (m < 2880 ? (m / 60) + " h" : (m / 1440) + " days"); }
   function parseTs(s) { return s ? new Date(s.replace(" ", "T") + "Z") : null; }
   function fmtDuration(a, b) { if (!a || !b) return "—"; var m = Math.round((b - a) / 60000); return m < 60 ? m + "m" : Math.floor(m / 60) + "h " + (m % 60) + "m"; }
   function fmtTime(ts) {
@@ -295,16 +434,35 @@ td.n,th.n{text-align:right}
     if (state.minutes > 1440) return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " " + d.toTimeString().slice(0, 5);
     return d.toTimeString().slice(0, 5);
   }
+  function metricInfo(name) { return state.rules.metrics[name] || METRIC_FALLBACK[name] || { label: name, unit: "" }; }
+  function fmtMetric(name, v) {
+    if (v == null) return "—";
+    if (name === "offline") return fmtAgo(v);
+    return (name === "load_1" ? Number(v).toFixed(2) : Number(v).toFixed(1)) + metricInfo(name).unit;
+  }
   function selectedHost() { return state.hosts.filter(function (h) { return h.host === state.selected; })[0] || null; }
+  function bar(v, color) { return '<i style="width:' + clamp(v) + '%;background:' + color + ';box-shadow:0 0 8px ' + color + '"></i>'; }
+  function cpuLimit() {
+    var r = state.rules.rules.filter(function (x) { return x.metric === "cpu" && x.enabled && (!x.host || x.host === state.selected); })
+      .sort(function (a, b) { return a.threshold - b.threshold; })[0];
+    return r ? r.threshold : null;
+  }
 
   /* ---------------- demo data (only when the API is unreachable) ---------------- */
+  var demoRules = [
+    { id: 1, metric: "cpu", threshold: 80, duration: 300, level: "warning", host: null, enabled: 1 },
+    { id: 2, metric: "cpu", threshold: 95, duration: 300, level: "critical", host: null, enabled: 1 },
+    { id: 3, metric: "ram", threshold: 85, duration: 300, level: "warning", host: null, enabled: 1 },
+    { id: 4, metric: "disk", threshold: 90, duration: 300, level: "warning", host: null, enabled: 1 },
+    { id: 5, metric: "offline", threshold: 180, duration: 0, level: "critical", host: null, enabled: 1 }
+  ];
   var demo = {
     hosts: function () {
       return [
-        { host: "linux-monitor", status: "up", last_seen_seconds_ago: 4, cpu: 6 + Math.round(Math.random() * 6), ram: 72, disk: 61 },
-        { host: "web-01", status: "up", last_seen_seconds_ago: 9, cpu: 84 + Math.round(Math.random() * 4), ram: 71, disk: 74 },
-        { host: "db-01", status: "up", last_seen_seconds_ago: 12, cpu: 41, ram: 76, disk: 88 },
-        { host: "worker-01", status: "down", last_seen_seconds_ago: 420, cpu: 0, ram: 0, disk: 0 }
+        { host: "linux-monitor", status: "up", last_seen_seconds_ago: 4, cpu: 6 + Math.round(Math.random() * 6), ram: 62, disk: 41, open_alerts: 0, alert_level: null },
+        { host: "web-01", status: "up", last_seen_seconds_ago: 9, cpu: 84 + Math.round(Math.random() * 4), ram: 71, disk: 74, open_alerts: 1, alert_level: "warning" },
+        { host: "db-01", status: "up", last_seen_seconds_ago: 12, cpu: 41, ram: 76, disk: 88, open_alerts: 0, alert_level: null },
+        { host: "worker-01", status: "down", last_seen_seconds_ago: 420, cpu: 0, ram: 0, disk: 0, open_alerts: 1, alert_level: "critical" }
       ];
     },
     metrics: function (host, minutes) {
@@ -319,29 +477,47 @@ td.n,th.n{text-align:right}
       }
       return out;
     },
+    details: function (host) {
+      var h = demo.hosts().filter(function (x) { return x.host === host; })[0];
+      if (!h || h.status !== "up") return null;
+      var cores = [], n = host === "db-01" ? 8 : 4;
+      for (var i = 0; i < n; i++) cores.push(clamp(h.cpu + Math.sin(i * 2.1) * 18));
+      return {
+        host: host, hostname: host, os: "Ubuntu 24.04.1 LTS", kernel: "6.8.0-1015-aws", arch: "x86_64", cpu_count: n,
+        ram_total: 8 * 1073741824, ram_used: h.ram / 100 * 8 * 1073741824, swap_total: 2147483648, disk_total: 30 * 1073741824, disk_used: h.disk / 100 * 30 * 1073741824,
+        uptime: 1123200, load: [h.cpu / 40, h.cpu / 45, h.cpu / 50], cores: cores, temp: 48.5, connections: 23, ssh_failed: host === "web-01" ? 14 : 0, age: 5,
+        services: [{ name: "sshd", running: true }, { name: "cron", running: true }, { name: "nginx", running: host === "web-01" }],
+        processes: [
+          { pid: 1412, name: host === "db-01" ? "postgres" : "nginx", user: "www-data", cpu: h.cpu * 0.6, mem: 4.2 },
+          { pid: 2203, name: "python3", user: "ubuntu", cpu: h.cpu * 0.2, mem: 2.8 },
+          { pid: 891, name: "sshd", user: "root", cpu: 0.4, mem: 0.3 },
+          { pid: 1, name: "systemd", user: "root", cpu: 0.1, mem: 0.2 }
+        ]
+      };
+    },
     anoms: function (host, rows) {
       if (host !== "web-01" || rows.length < 8) return [];
       var r = rows[rows.length - Math.floor(rows.length / 4)];
       return [{ ts: r.ts, metric: "cpu", value: r.cpu, mean: 58, low: 38, high: 74, z: 4.2 }];
     },
-    anomNow: function () {
-      return [{ host: "web-01", metric: "cpu", value: 86, mean: 58, low: 38, high: 74, z: 4.2 }];
-    },
+    anomNow: function () { return [{ host: "web-01", metric: "cpu", value: 86, mean: 58, low: 38, high: 74, z: 4.2 }]; },
     forecast: function () {
       return [
         { host: "db-01", status: "filling", disk_now: 88, slope_per_day: 1.9, days_to_full: 6.3 },
-        { host: "linux-monitor", status: "stable", disk_now: 61, slope_per_day: 0.01 },
+        { host: "linux-monitor", status: "stable", disk_now: 41, slope_per_day: 0.01 },
         { host: "web-01", status: "stable", disk_now: 74, slope_per_day: 0.02 }
       ];
     },
     alerts: function () {
       return [
-        { id: 4, name: "cpu", level: "warning", value: 86.2, threshold: 80, fired_at: "2026-10-14 06:12:03", resolved_at: null, resolved_value: null },
-        { id: 3, name: "disk", level: "warning", value: 91.0, threshold: 90, fired_at: "2026-10-14 03:40:11", resolved_at: "2026-10-14 04:02:55", resolved_value: 87.5 },
-        { id: 2, name: "ram", level: "warning", value: 88.4, threshold: 85, fired_at: "2026-10-13 22:15:40", resolved_at: "2026-10-13 22:31:02", resolved_value: 71.4 },
-        { id: 1, name: "cpu_critical", level: "critical", value: 97.1, threshold: 95, fired_at: "2026-10-13 19:02:18", resolved_at: "2026-10-13 19:09:44", resolved_value: 42.0 }
+        { id: "f6", host: "worker-01", name: "offline", level: "critical", value: 240, threshold: 180, unit: "s", fired_at: "2026-10-14 06:20:03", resolved_at: null, resolved_value: null },
+        { id: "f5", host: "web-01", name: "cpu", level: "warning", value: 86.2, threshold: 80, unit: "%", fired_at: "2026-10-14 06:12:03", resolved_at: null, resolved_value: null },
+        { id: "f4", host: "db-01", name: "disk", level: "warning", value: 91.0, threshold: 90, unit: "%", fired_at: "2026-10-14 03:40:11", resolved_at: "2026-10-14 04:02:55", resolved_value: 87.5 },
+        { id: "f3", host: "web-01", name: "ram", level: "warning", value: 88.4, threshold: 85, unit: "%", fired_at: "2026-10-13 22:15:40", resolved_at: "2026-10-13 22:31:02", resolved_value: 71.4 },
+        { id: "f2", host: "web-01", name: "cpu", level: "critical", value: 97.1, threshold: 95, unit: "%", fired_at: "2026-10-13 19:02:18", resolved_at: "2026-10-13 19:09:44", resolved_value: 42.0 }
       ];
-    }
+    },
+    rules: function () { return { metrics: METRIC_FALLBACK, protected: false, rules: demoRules }; }
   };
 
   /* ---------------- api ---------------- */
@@ -350,55 +526,65 @@ td.n,th.n{text-align:right}
     return fetch(path).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
       .catch(function () { enterDemo(); return fallback(); });
   }
-
-  /* optional features (storage.py, detect.py): a missing route returns empty, never flips to demo */
-  function apiSoft(path, fallback) {
+  /* optional features: a missing route returns the empty value, never flips to demo */
+  function apiSoft(path, fallback, empty) {
     if (state.demo) return Promise.resolve(fallback());
     return fetch(path).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .catch(function () { return []; });
+      .catch(function () { return empty === undefined ? [] : empty; });
+  }
+  function send(method, path, body) {
+    var headers = { "Content-Type": "application/json" }, token = $("token").value.trim();
+    if (token) headers["X-Admin-Token"] = token;
+    return fetch(path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (data) {
+          if (!r.ok) throw new Error(r.status === 401 ? "Enter the admin token from config.ini to change rules." : (data.detail || "Server said " + r.status));
+          return data;
+        });
+      });
   }
   function enterDemo() {
     if (state.demo) return;
     state.demo = true;
     setLive(false, "demo data");
-    $("mode").textContent = /vercel\.app/.test(location.host) ? "demo deployment · sample data · run your own server for live data" : "server not reachable — showing demo data";
+    $("mode").textContent = /vercel\.app/.test(location.host) ? "Demo deployment with sample data. Run your own server for live data." : "Server not reachable, showing demo data.";
   }
   function setLive(on, text) { $("live").classList.toggle("on", on); $("liveText").textContent = text; }
 
   /* ---------------- svg pieces ---------------- */
+  var GLOW = '<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
+
   function ring(size, stroke, value, color, inner) {
     var r = (size - stroke) / 2, c = 2 * Math.PI * r, cx = size / 2;
     var dash = (clamp(value) / 100) * c;
     return '<circle cx="' + cx + '" cy="' + cx + '" r="' + r + '" fill="none" stroke="' + COL.grid + '" stroke-width="' + stroke + '"/>' +
       '<circle cx="' + cx + '" cy="' + cx + '" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="' + stroke + '" stroke-dasharray="' + dash.toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(-90 ' + cx + ' ' + cx + ')" filter="url(#glow)"/>' + (inner || "");
   }
-  var GLOW = '<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
 
   function bigGauge(h) {
-    var v = h && h.status === "up" ? h.cpu : 0, off = !h || h.status !== "up";
+    var off = !h || h.status !== "up", v = off ? 0 : h.cpu;
     var size = 230, cx = 115, ticks = "";
     for (var i = 0; i < 60; i++) {
       var a = (i / 60) * 2 * Math.PI - Math.PI / 2, r1 = 108, r2 = i % 5 === 0 ? 100 : 104;
       var lit = !off && i / 60 * 100 <= v;
       ticks += '<line x1="' + (cx + r1 * Math.cos(a)).toFixed(1) + '" y1="' + (cx + r1 * Math.sin(a)).toFixed(1) + '" x2="' + (cx + r2 * Math.cos(a)).toFixed(1) + '" y2="' + (cx + r2 * Math.sin(a)).toFixed(1) + '" stroke="' + (lit ? levelColor(v) : COL.edge) + '" stroke-width="2"/>';
     }
-    var inner = '<g transform="translate(25 25)">' + ring(180, 14, off ? 0 : v, off ? COL.off : levelColor(v)) + '</g>' +
+    var inner = '<g transform="translate(25 25)">' + ring(180, 14, v, off ? COL.off : levelColor(v)) + '</g>' +
       '<text x="' + cx + '" y="' + (cx - 4) + '" text-anchor="middle" font-size="44" font-weight="700" fill="' + (off ? COL.off : COL.fg) + '">' + (off ? "—" : Math.round(v)) + '</text>' +
-      '<text x="' + cx + '" y="' + (cx + 22) + '" text-anchor="middle" font-size="11" letter-spacing="3" fill="' + COL.muted + '">' + (off ? "OFFLINE" : "CPU %") + '</text>';
+      '<text x="' + cx + '" y="' + (cx + 22) + '" text-anchor="middle" font-size="11" letter-spacing="2" fill="' + COL.muted + '">' + (off ? "offline" : "cpu %") + '</text>';
     return '<svg viewBox="0 0 ' + size + ' ' + size + '" role="img" aria-label="CPU ' + (off ? "offline" : Math.round(v) + " percent") + '">' + GLOW + ticks + inner + '</svg>';
   }
 
-  function miniGauge(label, v, off, fmt) {
+  function miniGauge(label, v, off, text) {
     var color = off ? COL.off : levelColor(v);
-    return '<div class="mini"><svg viewBox="0 0 58 58" role="img" aria-label="' + label + ' ' + (off ? "offline" : fmt) + '">' + GLOW + ring(58, 5, off ? 0 : v, color,
-      '<text x="29" y="33" text-anchor="middle" font-size="12" font-weight="700" fill="' + (off ? COL.off : COL.fg) + '" font-family="JetBrains Mono,monospace">' + (off ? "—" : fmt) + '</text>') + '</svg><span class="lb">' + label + '</span></div>';
+    return '<div class="mini"><svg viewBox="0 0 58 58" role="img" aria-label="' + label + ' ' + (off ? "offline" : text) + '">' + GLOW + ring(58, 5, off ? 0 : v, color,
+      '<text x="29" y="33" text-anchor="middle" font-size="12" font-weight="700" fill="' + (off ? COL.off : COL.fg) + '" font-family="JetBrains Mono,monospace">' + (off ? "—" : text) + '</text>') + '</svg><span class="lb">' + label + '</span></div>';
   }
 
   function barChart(rows) {
-    var W = 560, H = 190, L = 34, R = 6, T = 10, B = 20;
-    if (!rows.length) return '<div class="empty">no readings in this range</div>';
-    var n = Math.min(rows.length, 60), step = rows.length / n, bars = "", bw = (W - L - R) / n;
-    var marks = {};
+    var W = 560, H = 200, L = 34, R = 6, T = 10, B = 20, limitV = cpuLimit();
+    if (!rows.length) return '<div class="empty">No readings in this time range.</div>';
+    var n = Math.min(rows.length, 60), step = rows.length / n, bars = "", bw = (W - L - R) / n, marks = {};
     state.anoms.forEach(function (a) {
       if (a.metric !== "cpu") return;
       var best = 0;
@@ -409,51 +595,46 @@ td.n,th.n{text-align:right}
     var grid = [0, 50, 100].map(function (v) { return '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="' + COL.grid + '"/><text class="axis" x="' + (L - 6) + '" y="' + (Y(v) + 3) + '" text-anchor="end">' + v + '%</text>'; }).join("");
     for (var i = 0; i < n; i++) {
       var r = rows[Math.floor(i * step)], v = clamp(r.cpu), x = L + i * bw + 1, mix = i / Math.max(1, n - 1);
-      var color = v >= LIMITS.cpu ? COL.red : (mix < .5 ? COL.cyan : (mix < .8 ? COL.violet : COL.magenta));
-      var tip = fmtTime(r.ts) + "  ·  cpu " + Math.round(v) + "%" + (r.cpu_max != null ? " avg · " + Math.round(r.cpu_max) + "% max" : "");
+      var color = limitV != null && v >= limitV ? COL.red : (mix < .5 ? COL.cyan : (mix < .8 ? COL.violet : COL.magenta));
+      var tip = fmtTime(r.ts) + "  cpu " + Math.round(v) + "%" + (r.cpu_max != null ? " avg, " + Math.round(r.cpu_max) + "% max" : "");
       var an = marks[i];
       if (an) {
-        tip += "\n◆ unusual · normal " + Math.round(an.low) + "–" + Math.round(an.high) + "%";
+        tip += "\n◆ unusual, normal is " + Math.round(an.low) + "–" + Math.round(an.high) + "%";
         var mx = x + Math.max(1, bw - 2) / 2, my = Math.max(T + 6, Y(v) - 10);
         bars += '<path d="M' + mx.toFixed(1) + ' ' + (my - 6).toFixed(1) + 'l6 6l-6 6l-6 -6z" fill="' + COL.magenta + '" filter="url(#glow)"/>';
       }
       bars += '<g class="b"><rect class="bar" x="' + x.toFixed(1) + '" y="' + Y(v).toFixed(1) + '" width="' + Math.max(1, bw - 2).toFixed(1) + '" height="' + (H - B - Y(v)).toFixed(1) + '" fill="' + color + '" opacity="' + (0.55 + 0.45 * mix).toFixed(2) + '"/>' +
         '<rect class="hit" x="' + (L + i * bw).toFixed(1) + '" y="' + T + '" width="' + bw.toFixed(1) + '" height="' + (H - T - B) + '" data-tip="' + tip + '"/></g>';
     }
-    var limit = '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(LIMITS.cpu) + '" y2="' + Y(LIMITS.cpu) + '" stroke="' + COL.red + '" stroke-dasharray="4 4"/>';
+    var limit = limitV == null ? "" : '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(limitV) + '" y2="' + Y(limitV) + '" stroke="' + COL.red + '" stroke-dasharray="4 4"/>';
     var xl = '<text class="axis" x="' + L + '" y="' + (H - 5) + '">-' + rangeLabel(state.minutes) + '</text><text class="axis" x="' + (W - R) + '" y="' + (H - 5) + '" text-anchor="end">now</text>';
     return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="CPU history bars">' + GLOW + grid + limit + bars + xl + '</svg>';
   }
 
   function netChart(rows) {
-    var W = 900, H = 220, L = 46, R = 10, T = 12, B = 22;
-    if (!rows.length) return '<div class="empty">no readings in this range</div>';
-    var show = state.net;
-    var vals = [];
+    var W = 900, H = 230, L = 46, R = 10, T = 12, B = 22, show = state.net, vals = [];
+    if (!rows.length) return '<div class="empty">No readings in this time range.</div>';
     rows.forEach(function (r) { if (show.in) vals.push(r.net_in || 0); if (show.out) vals.push(r.net_out || 0); });
     vals.sort(function (a, b) { return a - b; });
     var top = vals[vals.length - 1] || 0, p95 = vals[Math.floor(0.95 * (vals.length - 1))] || 0;
-    var max = top <= p95 * 2 ? top * 1.15 : p95 * 1.5;
-    if (!max) max = 1;
-    var clipped = top > max;
-    var t0 = rows[0].ts, t1 = rows[rows.length - 1].ts, span = Math.max(1, t1 - t0);
+    var max = (top <= p95 * 2 ? top * 1.15 : p95 * 1.5) || 1, clipped = top > max;
+    var t0 = rows[0].ts, span = Math.max(1, rows[rows.length - 1].ts - t0);
     var X = function (t) { return L + (t - t0) / span * (W - L - R); };
     var Y = function (v) { return T + (1 - Math.min(v, max) / max) * (H - T - B); };
     var grid = [0, .25, .5, .75, 1].map(function (f) { var v = max * f; return '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v).toFixed(1) + '" y2="' + Y(v).toFixed(1) + '" stroke="' + COL.grid + '"/><text class="axis" x="' + (L - 6) + '" y="' + (Y(v) + 3).toFixed(1) + '" text-anchor="end">' + fmtBytes(v) + '</text>'; }).join("");
     function line(key, color) {
       var pts = rows.map(function (r) { return X(r.ts).toFixed(1) + "," + Y(r[key] || 0).toFixed(1); }).join(" ");
-      var dots = "", every = Math.max(1, Math.floor(rows.length / 8));
-      for (var i = 0; i < rows.length; i += every) dots += '<circle cx="' + X(rows[i].ts).toFixed(1) + '" cy="' + Y(rows[i][key] || 0).toFixed(1) + '" r="3.5" fill="' + color + '" filter="url(#glow)"/>';
-      return '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="2" filter="url(#glow)"/>' + dots;
+      var area = '<polygon points="' + X(t0).toFixed(1) + ',' + Y(0).toFixed(1) + ' ' + pts + ' ' + X(rows[rows.length - 1].ts).toFixed(1) + ',' + Y(0).toFixed(1) + '" fill="' + color + '" opacity=".08"/>';
+      return area + '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="2" filter="url(#glow)"/>';
     }
     var xl = '<text class="axis" x="' + L + '" y="' + (H - 6) + '">-' + rangeLabel(state.minutes) + '</text><text class="axis" x="' + (W - R) + '" y="' + (H - 6) + '" text-anchor="end">now</text>';
-    var hits = "", every2 = Math.max(1, Math.floor(rows.length / 120));
-    for (var j = 0; j < rows.length; j += every2) {
+    var hits = "", every = Math.max(1, Math.floor(rows.length / 120));
+    for (var j = 0; j < rows.length; j += every) {
       var r = rows[j], x = X(r.ts);
-      var prev = j > 0 ? X(rows[j - every2].ts) : L, next = j + every2 < rows.length ? X(rows[j + every2].ts) : W - R;
+      var prev = j > 0 ? X(rows[j - every].ts) : L, next = j + every < rows.length ? X(rows[j + every].ts) : W - R;
       var x0 = (prev + x) / 2, x1 = (x + next) / 2;
       var tip = fmtTime(r.ts) + "\nin   " + fmtBytes(r.net_in || 0) + "\nout  " + fmtBytes(r.net_out || 0);
-      hits += '<g class="s"><line class="xh" x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="' + T + '" y2="' + (H - B) + '" stroke="' + COL.yellow + '" stroke-dasharray="3 3"/>' +
+      hits += '<g class="s"><line class="xh" x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="' + T + '" y2="' + (H - B) + '" stroke="' + COL.amber + '" stroke-dasharray="3 3"/>' +
         (show.in ? '<circle class="xh" cx="' + x.toFixed(1) + '" cy="' + Y(r.net_in || 0).toFixed(1) + '" r="5" fill="' + COL.cyan + '"/>' : "") +
         (show.out ? '<circle class="xh" cx="' + x.toFixed(1) + '" cy="' + Y(r.net_out || 0).toFixed(1) + '" r="5" fill="' + COL.magenta + '"/>' : "") +
         '<rect class="hit" x="' + x0.toFixed(1) + '" y="' + T + '" width="' + Math.max(1, x1 - x0).toFixed(1) + '" height="' + (H - T - B) + '" data-tip="' + tip + '"/></g>';
@@ -462,42 +643,92 @@ td.n,th.n{text-align:right}
     if (clipped) {
       rows.forEach(function (r) {
         var v = Math.max(show.in ? r.net_in || 0 : 0, show.out ? r.net_out || 0 : 0);
-        if (v > max) { var x = X(r.ts); spikes += '<path d="M' + (x - 5).toFixed(1) + ' ' + (T + 8) + 'L' + x.toFixed(1) + ' ' + T + 'L' + (x + 5).toFixed(1) + ' ' + (T + 8) + 'z" fill="' + COL.yellow + '"/>'; }
+        if (v > max) { var x = X(r.ts); spikes += '<path d="M' + (x - 5).toFixed(1) + ' ' + (T + 8) + 'L' + x.toFixed(1) + ' ' + T + 'L' + (x + 5).toFixed(1) + ' ' + (T + 8) + 'z" fill="' + COL.amber + '"/>'; }
       });
-      spikes += '<text class="axis" x="' + (W - R) + '" y="' + (T + 20) + '" text-anchor="end" style="fill:' + COL.yellow + '">▲ spike above scale · hover for value</text>';
+      spikes += '<text class="axis" x="' + (W - R) + '" y="' + (T + 20) + '" text-anchor="end" style="fill:' + COL.amber + '">▲ spike above scale, hover for value</text>';
     }
     return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Network bytes in and out per interval">' + GLOW + grid +
       (show.in ? line("net_in", COL.cyan) : "") + (show.out ? line("net_out", COL.magenta) : "") + spikes + xl + hits + '</svg>';
   }
 
-  function spark(rows, color) {
-    if (!rows || rows.length < 2) return '<svg viewBox="0 0 120 30" aria-hidden="true"><line x1="0" x2="120" y1="15" y2="15" stroke="' + COL.edge + '" stroke-dasharray="3 3"/></svg>';
+  function spark(rows, color, w, h) {
+    w = w || 120; h = h || 30;
+    if (!rows || rows.length < 2) return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="' + w + '" y1="' + h / 2 + '" y2="' + h / 2 + '" stroke="' + COL.edge + '" stroke-dasharray="3 3"/></svg>';
     var t0 = rows[0].ts, span = Math.max(1, rows[rows.length - 1].ts - t0);
-    var pts = rows.map(function (r) { return ((r.ts - t0) / span * 118 + 1).toFixed(1) + "," + (28 - clamp(r.cpu) / 100 * 26).toFixed(1); }).join(" ");
-    return '<svg viewBox="0 0 120 30" aria-hidden="true">' + GLOW + '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.6" filter="url(#glow)"/></svg>';
+    var pts = rows.map(function (r) { return ((r.ts - t0) / span * (w - 2) + 1).toFixed(1) + "," + (h - 2 - clamp(r.cpu) / 100 * (h - 4)).toFixed(1); }).join(" ");
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' + GLOW + '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.6" vector-effect="non-scaling-stroke" filter="url(#glow)"/></svg>';
   }
 
-  /* ---------------- render ---------------- */
+  /* ---------------- render: shell ---------------- */
   function visibleHosts() {
-    var f = state.filter.toLowerCase();
-    var order = { crit: 0, warn: 1, ok: 2, down: 3 };
+    var f = state.filter.toLowerCase(), order = { crit: 0, warn: 1, ok: 2, down: 3 };
     return state.hosts.filter(function (h) { return h.host.toLowerCase().indexOf(f) !== -1; })
       .sort(function (a, b) { return order[hostLevel(a)] - order[hostLevel(b)] || a.host.localeCompare(b.host); });
   }
 
-  function renderKpis() {
-    var up = state.hosts.filter(function (h) { return h.status === "up"; });
-    var avg = up.length ? up.reduce(function (s, h) { return s + h.cpu; }, 0) / up.length : 0;
-    $("kUp").textContent = up.length;
-    $("kDown").textContent = state.hosts.length - up.length;
-    $("kDown").className = "v" + (state.hosts.length - up.length ? " c-red" : "");
-    $("kAlerts").textContent = state.alerts.filter(function (a) { return !a.resolved_at; }).length;
-    $("kAvg").textContent = Math.round(avg) + "%";
-    $("kAvg").className = "v " + levelClass(avg);
-    renderBanner();
+  function led(v, off) { return '<span class="led ' + (off ? "" : level(v)) + '"></span>'; }
+
+  function renderRack() {
+    var list = visibleHosts(), el = $("units");
+    if (!list.length) { el.innerHTML = '<div class="empty">' + (state.hosts.length ? "No nodes match the filter." : "Waiting for the first agent to report.") + '</div>'; return; }
+    el.innerHTML = list.map(function (h) {
+      var off = h.status !== "up", lv = hostLevel(h);
+      return '<button class="unit' + (state.view === "node" && h.host === state.selected ? " sel" : "") + '" data-host="' + esc(h.host) + '" aria-label="' + esc(h.host) + ', ' + (off ? "offline" : lv) + '">' +
+        '<span class="leds" aria-hidden="true"><span class="led ' + (off ? "" : "ok") + '"></span>' + led(h.cpu, off) + led(h.ram, off) + led(h.disk, off) + '</span>' +
+        '<span class="nm">' + esc(h.host) + '</span>' +
+        '<span class="pc">' + (off ? "off" : Math.round(h.cpu) + "%") + '</span>' +
+        '<span class="meter">' + (off ? "" : bar(h.cpu, levelColor(h.cpu))) + '</span></button>';
+    }).join("");
   }
 
-  function fmtDays(d) { return d < 1 ? Math.round(d * 24) + " h" : (d < 365 ? d.toFixed(d < 10 ? 1 : 0) + " d" : "> 1 yr"); }
+  function renderBanner() {
+    var items = [], alerted = {};
+    state.alerts.forEach(function (a) {
+      if (a.resolved_at) return;
+      alerted[a.host] = true;
+      items.push({ host: a.host, text: (a.name === "offline" ? "offline" : metricInfo(a.name).label + " at " + fmtMetric(a.name, a.value) + ", limit " + fmtMetric(a.name, a.threshold)), lv: a.level === "critical" ? "crit" : "warn" });
+    });
+    state.hosts.forEach(function (h) {
+      if (h.status !== "up" && !alerted[h.host]) items.push({ host: h.host, text: "offline, last seen " + fmtAgo(h.last_seen_seconds_ago) + " ago", lv: "crit" });
+    });
+    state.anomNow.forEach(function (a) {
+      items.push({ host: a.host, text: a.metric + " " + Math.round(a.value) + "% is unusual (normally " + Math.round(a.low) + "–" + Math.round(a.high) + "%)", lv: "anom" });
+    });
+    state.forecast.forEach(function (f) {
+      if (f.status === "filling" && f.days_to_full < 14) items.push({ host: f.host, text: "disk full in about " + fmtDays(f.days_to_full), lv: f.days_to_full < 3 ? "crit" : "warn" });
+    });
+    var el = $("banner");
+    if (!items.length) { el.hidden = true; return; }
+    var worst = items.some(function (i) { return i.lv === "crit"; }) ? "crit" : "warn";
+    el.className = "banner" + (worst === "warn" ? " warn" : "");
+    el.innerHTML = '<span class="bt" style="color:' + (worst === "crit" ? COL.red : COL.amber) + '">' + items.length + (items.length === 1 ? " problem" : " problems") + '</span>' +
+      items.map(function (i) {
+        return '<button class="item" data-host="' + esc(i.host) + '" style="color:' + (i.lv === "crit" ? COL.red : (i.lv === "anom" ? COL.magenta : COL.amber)) + '">' + (i.lv === "anom" ? "◆ " : "") + esc(i.host) + ': ' + esc(i.text) + '</button>';
+      }).join("");
+    el.hidden = false;
+  }
+
+  function renderBadge() {
+    var open = state.alerts.filter(function (a) { return !a.resolved_at; }).length, b = $("navBadge");
+    b.hidden = !open; b.textContent = open;
+  }
+
+  /* ---------------- render: overview ---------------- */
+  function renderKpis() {
+    var up = state.hosts.filter(function (h) { return h.status === "up"; });
+    var avg = function (k) { return up.length ? up.reduce(function (s, h) { return s + h[k]; }, 0) / up.length : 0; };
+    var down = state.hosts.length - up.length, open = state.alerts.filter(function (a) { return !a.resolved_at; }).length;
+    $("kUp").textContent = up.length;
+    $("kDown").textContent = down;
+    $("kDown").className = "v" + (down ? " c-red" : " c-muted");
+    $("kAlerts").textContent = open;
+    $("kAlerts").className = "v " + (open ? "c-mag" : "c-muted");
+    $("kCpu").textContent = Math.round(avg("cpu")) + "%";
+    $("kCpu").className = "v " + levelClass(avg("cpu"));
+    $("kRam").textContent = Math.round(avg("ram")) + "%";
+    $("kRam").className = "v " + levelClass(avg("ram"));
+    $("ovSub").textContent = state.hosts.length + (state.hosts.length === 1 ? " node" : " nodes");
+  }
 
   function renderForecast() {
     var list = state.forecast, el = $("kDisk"), sub = $("kDiskSub");
@@ -505,153 +736,342 @@ td.n,th.n{text-align:right}
     if (filling.length) {
       var f = filling[0];
       el.textContent = fmtDays(f.days_to_full);
-      el.className = "v " + (f.days_to_full < 3 ? "c-red" : (f.days_to_full < 14 ? "c-yellow" : "c-cyan"));
-      sub.textContent = f.host + " · +" + f.slope_per_day.toFixed(1) + "%/day";
+      el.className = "v " + (f.days_to_full < 3 ? "c-red" : (f.days_to_full < 14 ? "c-amber" : "c-cyan"));
+      sub.textContent = f.host + ", +" + f.slope_per_day.toFixed(1) + "% a day";
     } else if (list.some(function (f) { return f.status === "stable"; })) {
-      el.textContent = "stable"; el.className = "v c-cyan"; sub.textContent = "no disk filling up";
+      el.textContent = "never"; el.className = "v c-cyan"; sub.textContent = "no disk is filling up";
     } else {
-      el.textContent = "—"; el.className = "v c-muted"; sub.textContent = "learning (needs 6 h of data)";
+      el.textContent = "—"; el.className = "v c-muted"; sub.textContent = "needs 6 h of data";
     }
   }
 
-  function levelClass(v) { return { ok: "c-cyan", warn: "c-yellow", crit: "c-red" }[level(v)]; }
-
-  function renderBanner() {
-    var items = [];
-    state.hosts.forEach(function (h) {
-      if (h.status !== "up") { items.push({ host: h.host, text: "offline · seen " + fmtAgo(h.last_seen_seconds_ago) + " ago", lv: "crit" }); return; }
-      [["cpu", h.cpu], ["ram", h.ram], ["disk", h.disk]].forEach(function (m) {
-        var limit = LIMITS[m[0]];
-        if (m[1] >= limit) items.push({ host: h.host, text: m[0] + " " + Math.round(m[1]) + "% · over limit (" + limit + "%)", lv: "crit" });
-        else if (m[1] >= limit - 5) items.push({ host: h.host, text: m[0] + " " + Math.round(m[1]) + "% · near limit (" + limit + "%)", lv: "warn" });
-      });
-    });
-    state.anomNow.forEach(function (a) {
-      items.push({ host: a.host, text: a.metric + " " + Math.round(a.value) + "% · unusual (normal " + Math.round(a.low) + "–" + Math.round(a.high) + "%)", lv: "anom" });
-    });
-    state.forecast.forEach(function (f) {
-      if (f.status === "filling" && f.days_to_full < 14) items.push({ host: f.host, text: "disk full in ~" + fmtDays(f.days_to_full), lv: f.days_to_full < 3 ? "crit" : "warn" });
-    });
-    var el = $("banner");
-    if (!items.length) { el.hidden = true; return; }
-    var worst = items.some(function (i) { return i.lv === "crit"; }) ? "crit" : "warn";
-    el.className = "banner" + (worst === "warn" ? " warn" : "");
-    el.innerHTML = '<span class="bt" style="color:' + (worst === "crit" ? COL.red : COL.yellow) + '">' + items.length + (items.length === 1 ? " issue" : " issues") + '</span>' +
-      items.map(function (i) {
-        return '<button class="item" data-host="' + esc(i.host) + '" style="color:' + (i.lv === "crit" ? COL.red : (i.lv === "anom" ? COL.magenta : COL.yellow)) + '">' + (i.lv === "anom" ? "◆ " : "") + esc(i.host) + ' · ' + esc(i.text) + '</button>';
-      }).join("");
-    el.hidden = false;
-  }
-
-  function renderNodes() {
-    var list = visibleHosts(), el = $("nodes");
-    if (!list.length) { el.innerHTML = '<div class="empty">' + (state.hosts.length ? "no nodes match the filter" : "waiting for the first agent…") + '</div>'; return; }
+  function renderCards() {
+    var list = visibleHosts(), el = $("cards");
+    if (!list.length) { el.innerHTML = '<div class="panel empty">' + (state.hosts.length ? "No nodes match the filter." : "No nodes yet. Start agent.py on a machine and it shows up here within a minute.") + '</div>'; return; }
     el.innerHTML = list.map(function (h) {
-      var lv = hostLevel(h), off = lv === "down";
-      return '<button class="node' + (h.host === state.selected ? " sel" : "") + '" data-host="' + esc(h.host) + '" aria-label="' + esc(h.host) + ' ' + lv + '">' +
-        '<span class="lamp ' + lv + '"></span>' +
-        '<span><span class="nname">' + esc(h.host) + '</span><br><span class="nsub">' + (off ? "offline · " : "") + "seen " + fmtAgo(h.last_seen_seconds_ago) + ' ago</span></span>' +
-        '<span class="nvals">' + (off ? '<span class="u">—</span>' :
-          '<span><span class="u">cpu </span><b style="color:' + levelColor(h.cpu) + '">' + Math.round(h.cpu) + '</b></span>' +
-          '<span><span class="u">ram </span><b style="color:' + levelColor(h.ram) + '">' + Math.round(h.ram) + '</b></span>' +
-          '<span><span class="u">dsk </span><b style="color:' + levelColor(h.disk) + '">' + Math.round(h.disk) + '</b></span>') +
-        '</span></button>';
+      var off = h.status !== "up", lv = hostLevel(h);
+      var alertTag = h.open_alerts ? '<span class="alert" style="color:' + (h.alert_level === "critical" ? COL.red : COL.amber) + '">' + h.open_alerts + (h.open_alerts === 1 ? " alert" : " alerts") + '</span>' : "";
+      var row = function (k, v) { return '<span class="l">' + k + '</span><span class="t">' + (off ? "" : bar(v, levelColor(v))) + '</span><span class="n" style="color:' + (off ? COL.off : levelColor(v)) + '">' + (off ? "—" : Math.round(v) + "%") + '</span>'; };
+      return '<button class="panel card" data-host="' + esc(h.host) + '" aria-label="Open ' + esc(h.host) + '">' +
+        '<span class="top"><span class="lamp ' + lv + '"></span><span style="min-width:0"><span class="name" style="display:block">' + esc(h.host) + '</span><span class="seen">' + (off ? "offline, last seen " : "seen ") + fmtAgo(h.last_seen_seconds_ago) + ' ago</span></span>' + alertTag + '</span>' +
+        '<span class="bars">' + row("cpu", h.cpu) + row("ram", h.ram) + row("disk", h.disk) + '</span>' +
+        spark(state.traces[h.host], off ? COL.off : levelColor(h.cpu), 240, 34) + '</button>';
     }).join("");
-  }
-
-  function renderGauge(rows) {
-    var h = selectedHost(), off = !h || h.status !== "up";
-    $("gTitle").textContent = h ? h.host : "host";
-    $("gSub").textContent = h ? (off ? "offline" : "live") : "select a node";
-    $("gauge").innerHTML = bigGauge(h);
-    var last = rows && rows.length ? rows[rows.length - 1] : {};
-    var swap = last.swap != null ? last.swap : 0, load = last.load_1 != null ? last.load_1 : 0;
-    $("minis").innerHTML =
-      miniGauge("ram", off ? 0 : h.ram, off, Math.round(off ? 0 : h.ram) + "") +
-      miniGauge("disk", off ? 0 : h.disk, off, Math.round(off ? 0 : h.disk) + "") +
-      miniGauge("swap", swap, off || last.swap == null, Math.round(swap) + "") +
-      miniGauge("load", Math.min(100, load * 25), off || last.load_1 == null, load.toFixed(1));
-  }
-
-  function renderDetail(rows) {
-    state.rows = rows;
-    var peak = rows.reduce(function (m, r) { return Math.max(m, r.cpu); }, 0);
-    $("hPeak").textContent = rows.length ? Math.round(peak) + "%" : "—";
-    $("hPeak").className = "big " + (rows.length ? levelClass(peak) : "");
-    $("hSub").textContent = (state.selected || "selected node") + " · peak in last " + rangeLabel(state.minutes);
-    $("hist").innerHTML = barChart(rows);
-    $("net").innerHTML = netChart(rows);
-    renderGauge(rows);
   }
 
   function renderTraces() {
     var list = visibleHosts();
-    $("tSub").textContent = "all nodes · " + rangeLabel(state.minutes);
+    $("tSub").textContent = "last " + rangeLabel(state.minutes);
     $("traces").innerHTML = list.length ? list.map(function (h) {
       var off = h.status !== "up", color = off ? COL.off : levelColor(h.cpu);
-      return '<button class="trace' + (h.host === state.selected ? " sel" : "") + '" data-host="' + esc(h.host) + '" aria-label="Show ' + esc(h.host) + '"><span class="nname">' + esc(h.host) + '</span>' + spark(state.traces[h.host], color) +
+      return '<button class="trace" data-host="' + esc(h.host) + '" aria-label="Open ' + esc(h.host) + '"><span class="nname">' + esc(h.host) + '</span>' + spark(state.traces[h.host], color) +
         '<span style="text-align:right;color:' + color + '">' + (off ? "—" : Math.round(h.cpu) + "%") + '</span></button>';
-    }).join("") : '<div class="empty">no nodes</div>';
+    }).join("") : '<div class="empty">No nodes yet.</div>';
   }
 
+  function alertLine(a, withHost) {
+    var open = !a.resolved_at, color = open ? (a.level === "critical" ? COL.red : COL.amber) : COL.cyan;
+    var what = a.name === "offline" ? "went offline" : metricInfo(a.name).label + " " + fmtMetric(a.name, a.value);
+    return '<div class="row"><span class="tag" style="color:' + color + '">' + (open ? a.level : "resolved") + '</span>' +
+      '<span>' + (withHost ? '<button class="hostlink" data-host="' + esc(a.host) + '">' + esc(a.host) + '</button> ' : "") + esc(what) + '</span>' +
+      '<span class="when">' + esc((a.fired_at || "").slice(5, 16)) + '</span></div>';
+  }
+
+  function renderRecent() {
+    var list = state.alerts.slice(0, 7);
+    $("recent").innerHTML = list.length ? list.map(function (a) { return alertLine(a, true); }).join("") : '<div class="empty">No alerts yet. That is good news.</div>';
+  }
+
+  /* ---------------- render: node page ---------------- */
+  function renderNodeHead() {
+    var h = selectedHost(), d = state.details, el = $("nodeHead");
+    if (!h) { el.innerHTML = '<div class="empty" style="grid-column:1/-1">No node called ' + esc(state.selected) + ' has reported yet.</div>'; return; }
+    var off = h.status !== "up";
+    var os = d ? [d.os, d.kernel && "kernel " + d.kernel, d.arch].filter(Boolean).join(", ") : "Details appear once this node runs the new agent.py.";
+    var facts = [
+      [off ? "offline for" : "last report", fmtAgo(h.last_seen_seconds_ago) + " ago"],
+      ["uptime", d && d.uptime ? fmtUptime(d.uptime) : "—"],
+      ["cpu cores", d ? d.cpu_count : "—"],
+      ["memory", d ? fmtBytes(d.ram_used) + " / " + fmtBytes(d.ram_total) : "—"],
+      ["disk /", d ? fmtBytes(d.disk_used) + " / " + fmtBytes(d.disk_total) : "—"],
+      ["open alerts", h.open_alerts || 0]
+    ];
+    el.innerHTML = '<span class="lamp ' + hostLevel(h) + '"></span><h1>' + esc(h.host) + '</h1><span class="os">' + esc(os) + '</span>' +
+      '<div class="facts">' + facts.map(function (f) { return '<div class="fact"><div class="v">' + esc(f[1]) + '</div><div class="k">' + f[0] + '</div></div>'; }).join("") + '</div>';
+  }
+
+  function renderGauge() {
+    var h = selectedHost(), off = !h || h.status !== "up", rows = state.rows;
+    var last = rows && rows.length ? rows[rows.length - 1] : {};
+    var swap = last.swap != null ? last.swap : 0, load = last.load_1 != null ? last.load_1 : 0;
+    var cores = state.details && state.details.cpu_count || 4;
+    $("gSub").textContent = off ? "offline" : "live";
+    $("gauge").innerHTML = bigGauge(h);
+    $("minis").innerHTML =
+      miniGauge("ram", off ? 0 : h.ram, off, Math.round(off ? 0 : h.ram) + "") +
+      miniGauge("disk", off ? 0 : h.disk, off, Math.round(off ? 0 : h.disk) + "") +
+      miniGauge("swap", swap, off || last.swap == null, Math.round(swap) + "") +
+      miniGauge("load", Math.min(100, load / cores * 100), off || last.load_1 == null, load.toFixed(1));
+  }
+
+  function renderHistory() {
+    var rows = state.rows, peak = rows.reduce(function (m, r) { return Math.max(m, r.cpu); }, 0);
+    $("hPeak").textContent = rows.length ? Math.round(peak) + "%" : "—";
+    $("hPeak").className = "big " + (rows.length ? levelClass(peak) : "c-muted");
+    $("hSub").textContent = "peak in the last " + rangeLabel(state.minutes);
+    $("hist").innerHTML = barChart(rows);
+    $("net").innerHTML = netChart(rows);
+  }
+
+  function renderSystem() {
+    var d = state.details, f = state.forecast.filter(function (x) { return x.host === state.selected; })[0];
+    var disk = !f ? "—" : (f.status === "filling" ? "full in " + fmtDays(f.days_to_full) : (f.status === "stable" ? "not filling" : "learning"));
+    var items = [
+      ["load 1/5/15 min", d ? d.load.map(function (x) { return Number(x).toFixed(2); }).join(" / ") : "—"],
+      ["temperature", d && d.temp != null ? d.temp + " °C" : "no sensor"],
+      ["connections", d && d.connections != null ? d.connections : "needs root"],
+      ["failed ssh logins", d && d.ssh_failed != null ? d.ssh_failed + " last minute" : "no log access"],
+      ["swap size", d ? fmtBytes(d.swap_total) : "—"],
+      ["disk", disk]
+    ];
+    $("sys").innerHTML = items.map(function (i) { return '<dt>' + i[0] + '</dt><dd>' + esc(i[1]) + '</dd>'; }).join("");
+    $("sysAge").textContent = d ? "updated " + fmtAgo(d.age || 0) + " ago" : "";
+  }
+
+  function renderCores() {
+    var d = state.details;
+    if (!d || !d.cores) { $("cores").innerHTML = '<div class="note">Per-core usage appears once this node runs the new agent.py.</div>'; $("coreSub").textContent = ""; return; }
+    $("coreSub").textContent = d.cores.length + " cores";
+    $("cores").innerHTML = d.cores.map(function (v, i) {
+      return '<div class="core"><span class="l">c' + i + '</span><span class="t">' + bar(v, levelColor(v)) + '</span><span class="n" style="color:' + levelColor(v) + '">' + Math.round(v) + '%</span></div>';
+    }).join("");
+  }
+
+  function renderProcs() {
+    var d = state.details;
+    if (!d || !d.processes) { $("procs").innerHTML = '<tr><td colspan="5" class="note">The process list appears once this node runs the new agent.py.</td></tr>'; return; }
+    $("procs").innerHTML = d.processes.length ? d.processes.map(function (p) {
+      return '<tr><td class="n c-muted">' + p.pid + '</td><td>' + esc(p.name) + '</td><td class="c-muted">' + esc(p.user || "—") + '</td>' +
+        '<td class="n" style="color:' + levelColor(p.cpu) + '">' + Number(p.cpu).toFixed(1) + '%<span class="pbar">' + bar(p.cpu, levelColor(p.cpu)) + '</span></td>' +
+        '<td class="n">' + Number(p.mem).toFixed(1) + '%<span class="pbar">' + bar(p.mem, COL.violet) + '</span></td></tr>';
+    }).join("") : '<tr><td colspan="5" class="note">No processes reported.</td></tr>';
+  }
+
+  function renderServices() {
+    var d = state.details;
+    if (!d || !d.services) { $("svcs").innerHTML = '<div class="note">Service checks appear once this node runs the new agent.py.</div>'; $("svcSub").textContent = ""; return; }
+    var down = d.services.filter(function (s) { return !s.running; }).length;
+    $("svcSub").textContent = d.services.length ? (down ? down + " not running" : "all running") : "";
+    $("svcs").innerHTML = d.services.length ? d.services.map(function (s) {
+      return '<div class="svc"><span class="lamp ' + (s.running ? "ok" : "crit") + '"></span>' + esc(s.name) + '<span class="st" style="color:' + (s.running ? COL.cyan : COL.red) + '">' + (s.running ? "running" : "not running") + '</span></div>';
+    }).join("") : '<div class="note">No services listed in config.ini [monitor] services.</div>';
+  }
+
+  function renderNodeAlerts() {
+    var list = state.nodeAlerts.slice(0, 6);
+    $("nodeAlertsLink").href = "#/alerts";
+    $("nodeAlerts").innerHTML = list.length ? list.map(function (a) { return alertLine(a, false); }).join("") : '<div class="empty">No alerts on this node.</div>';
+  }
+
+  function renderNode() {
+    renderNodeHead(); renderGauge(); renderHistory(); renderSystem(); renderCores(); renderProcs(); renderServices(); renderNodeAlerts();
+  }
+
+  /* ---------------- render: alerts page ---------------- */
   function renderAlerts() {
+    var hosts = {}, sel = $("alertHost");
+    state.hosts.forEach(function (h) { hosts[h.host] = 1; });
+    state.alerts.forEach(function (a) { hosts[a.host] = 1; });
+    var names = Object.keys(hosts).sort();
+    sel.innerHTML = '<option value="">all nodes</option>' + names.map(function (n) { return '<option' + (n === state.alertHost ? " selected" : "") + '>' + esc(n) + '</option>'; }).join("");
+
     var list = state.alerts.filter(function (a) {
+      if (state.alertHost && a.host !== state.alertHost) return false;
       return state.alertFilter === "open" ? !a.resolved_at : (state.alertFilter === "resolved" ? !!a.resolved_at : true);
     });
-    var M = { cpu: "cpu", cpu_critical: "cpu", ram: "ram", disk: "disk" };
+    $("alertCount").textContent = list.length + (list.length === 1 ? " alert" : " alerts");
     $("alertRows").innerHTML = list.length ? list.map(function (a) {
-      var open = !a.resolved_at, color = open ? (a.level === "critical" ? COL.red : COL.yellow) : COL.cyan;
+      var open = !a.resolved_at, color = open ? (a.level === "critical" ? COL.red : COL.amber) : COL.cyan;
       var fired = parseTs(a.fired_at), resolved = parseTs(a.resolved_at);
-      return '<tr><td>' + a.id + '</td><td><span class="tag" style="color:' + color + '">' + (open ? a.level.toUpperCase() : "RESOLVED") + '</span></td>' +
-        '<td>' + esc(M[a.name] || a.name) + '</td><td class="n">' + Number(a.value).toFixed(1) + '%</td><td class="n">' + Number(a.threshold).toFixed(0) + '%</td>' +
-        '<td>' + esc(a.fired_at) + '</td><td>' + (open ? '<span style="color:' + color + '">open</span>' : esc(a.resolved_at) + ' → ' + Number(a.resolved_value).toFixed(1) + '%') + '</td>' +
+      return '<tr><td><span class="tag" style="color:' + color + '">' + (open ? a.level : "resolved") + '</span></td>' +
+        '<td><button class="hostlink" data-host="' + esc(a.host) + '">' + esc(a.host) + '</button></td>' +
+        '<td>' + esc(metricInfo(a.name === "cpu_critical" ? "cpu" : a.name).label) + '</td><td class="n">' + fmtMetric(a.name, a.value) + '</td><td class="n">' + fmtMetric(a.name, a.threshold) + '</td>' +
+        '<td>' + esc(a.fired_at) + '</td><td>' + (open ? '<span style="color:' + color + '">still open</span>' : esc(a.resolved_at) + (a.resolved_value != null ? ' at ' + fmtMetric(a.name, a.resolved_value) : "")) + '</td>' +
         '<td class="n">' + (open ? fmtDuration(fired, new Date()) : fmtDuration(fired, resolved)) + '</td></tr>';
-    }).join("") : '<tr><td colspan="8" class="empty">no alerts here</td></tr>';
+    }).join("") : '<tr><td colspan="8" class="empty">No alerts match.</td></tr>';
+  }
+
+  /* ---------------- render: rules page ---------------- */
+  function ruleRow(r) {
+    var off = r.metric === "offline", unit = metricInfo(r.metric).unit;
+    var shown = off ? r.threshold / 60 : r.threshold;
+    var metrics = Object.keys(state.rules.metrics).map(function (k) { return '<option value="' + k + '"' + (k === r.metric ? " selected" : "") + '>' + esc(metricInfo(k).label) + '</option>'; }).join("");
+    var hostNames = state.hosts.map(function (h) { return h.host; });
+    if (r.host && hostNames.indexOf(r.host) === -1) hostNames.push(r.host);
+    var hosts = '<option value="">every node</option>' + hostNames.map(function (n) { return '<option' + (n === r.host ? " selected" : "") + '>' + esc(n) + '</option>'; }).join("");
+    return '<tr data-id="' + (r.id || "") + '" class="' + (r.enabled ? "" : "off") + (r.id ? "" : " dirty") + '">' +
+      '<td><label class="check"><input type="checkbox" data-f="enabled"' + (r.enabled ? " checked" : "") + ' aria-label="Rule on"></label></td>' +
+      '<td><select data-f="metric" aria-label="Metric">' + metrics + '</select></td>' +
+      '<td>' + (off ? "silent for " : "≥ ") + '<input class="field" type="number" min="0" step="any" data-f="threshold" value="' + Number(shown.toFixed(2)) + '" aria-label="Limit"><span class="unit-l">' + (off ? "min" : esc(unit)) + '</span></td>' +
+      '<td>' + (off ? '<span class="c-muted">right away</span>' : 'for <input class="field" type="number" min="0" step="any" data-f="duration" value="' + Number((r.duration / 60).toFixed(2)) + '" aria-label="Wait in minutes"><span class="unit-l">min</span>') + '</td>' +
+      '<td><select data-f="level" aria-label="Level"><option' + (r.level === "warning" ? " selected" : "") + '>warning</option><option' + (r.level === "critical" ? " selected" : "") + '>critical</option></select></td>' +
+      '<td><select data-f="host" aria-label="Node">' + hosts + '</select></td>' +
+      '<td><button class="btn primary" data-act="save"' + (r.id ? " disabled" : "") + '>Save</button> <button class="btn danger" data-act="delete">Delete</button></td></tr>';
+  }
+
+  function renderRules() {
+    $("tokenRow").hidden = !state.rules.protected;
+    var rules = state.rules.rules.slice().sort(function (a, b) { return a.metric.localeCompare(b.metric) || a.threshold - b.threshold; });
+    $("ruleRows").innerHTML = rules.length ? rules.map(ruleRow).join("") : '<tr><td colspan="7" class="empty">No rules, so nothing will alert. Add one below.</td></tr>';
+  }
+
+  function readRule(tr) {
+    var get = function (f) { var el = tr.querySelector('[data-f="' + f + '"]'); return el ? (el.type === "checkbox" ? el.checked : el.value) : null; };
+    var metric = get("metric"), t = Number(get("threshold"));
+    return {
+      metric: metric,
+      threshold: metric === "offline" ? t * 60 : t,
+      duration: metric === "offline" ? 0 : Number(get("duration") || 0) * 60,
+      level: get("level"),
+      host: get("host") || null,
+      enabled: get("enabled")
+    };
+  }
+
+  function ruleMsg(text, ok) { var m = $("ruleMsg"); m.textContent = text; m.className = "msg " + (ok ? "ok" : "err"); }
+
+  function saveRule(tr) {
+    var rule = readRule(tr), id = tr.dataset.id;
+    if (isNaN(rule.threshold) || rule.threshold < 0 || isNaN(rule.duration) || rule.duration < 0) { ruleMsg("Limit and wait must be zero or more.", false); return; }
+    if (state.demo) {
+      if (id) demoRules = demoRules.map(function (r) { return String(r.id) === id ? Object.assign({ id: r.id }, rule, { enabled: rule.enabled ? 1 : 0 }) : r; });
+      else demoRules.push(Object.assign({ id: Date.now() }, rule, { enabled: rule.enabled ? 1 : 0 }));
+      ruleMsg("Saved (demo only, nothing sent to a server).", true); loadRules(); return;
+    }
+    send(id ? "PUT" : "POST", id ? "/rules/" + id : "/rules", rule)
+      .then(function () { ruleMsg("Rule saved. It applies from the next reading.", true); loadRules(); loadAlerts(); })
+      .catch(function (e) { ruleMsg(e.message, false); });
+  }
+
+  function deleteRule(tr) {
+    var id = tr.dataset.id;
+    if (!id) { tr.remove(); ruleMsg("", true); return; }
+    if (tr.dataset.confirm !== "1") {
+      tr.dataset.confirm = "1";
+      tr.querySelector('[data-act="delete"]').textContent = "Click again to delete";
+      return;
+    }
+    if (state.demo) { demoRules = demoRules.filter(function (r) { return String(r.id) !== id; }); ruleMsg("Deleted (demo only).", true); loadRules(); return; }
+    send("DELETE", "/rules/" + id)
+      .then(function () { ruleMsg("Rule deleted. Its open alerts were closed.", true); loadRules(); loadAlerts(); })
+      .catch(function (e) { ruleMsg(e.message, false); });
   }
 
   /* ---------------- loaders ---------------- */
-  function setHosts(list) {
-    state.hosts = list;
-    if (!state.selected && list.length) {
-      var first = list.filter(function (h) { return h.status === "up"; })[0] || list[0];
-      state.selected = first.host;
-      loadDetail();
-    }
-    renderKpis(); renderNodes(); renderTraces();
-    var h = selectedHost();
-    if (h) { $("gauge").innerHTML = bigGauge(h); }
+  function fetchRows(host) {
+    var m = state.minutes;
+    if (m <= 1440) return api("/metrics?host=" + encodeURIComponent(host) + "&minutes=" + m, function () { return demo.metrics(host, m); });
+    // over 24 h reads the hourly rollups from storage.py
+    return apiSoft("/history?host=" + encodeURIComponent(host) + "&days=" + Math.round(m / 1440), function () { return demo.metrics(host, m); })
+      .then(function (list) {
+        if (state.demo) return list;
+        return list.map(function (h) {
+          return { ts: h.hour + 1800, cpu: h.cpu_avg, cpu_max: h.cpu_max, ram: h.ram_avg, disk: h.disk_avg, swap: h.swap_avg, load_1: h.load_avg, net_in: h.net_in_sum, net_out: h.net_out_sum };
+        });
+      });
   }
 
-  function loadDetail() {
+  function setHosts(list) {
+    state.hosts = list;
+    renderRack();
+    if (state.view === "overview") { renderKpis(); renderCards(); renderTraces(); }
+    if (state.view === "node") { renderNodeHead(); renderGauge(); }
+    renderBanner();
+  }
+
+  function loadNode() {
     var name = state.selected;
     if (!name) return;
-    renderNodes();
-    if (state.minutes > 1440) $("mode").textContent = "7d / 30d use hourly averages (storage.py) · only full hours appear";
-    else if (!state.demo) $("mode").textContent = "";
     fetchRows(name).then(function (rows) {
       if (state.minutes > 1440) return [rows, []];
-      return api("/anomalies?host=" + encodeURIComponent(name) + "&minutes=" + state.minutes, function () { return demo.anoms(name, rows); })
+      return apiSoft("/anomalies?host=" + encodeURIComponent(name) + "&minutes=" + state.minutes, function () { return demo.anoms(name, rows); })
         .then(function (a) { return [rows, a]; });
     }).then(function (res) {
       if (state.selected !== name) return;
-      state.anoms = res[1];
-      renderDetail(res[0]);
+      state.rows = res[0]; state.anoms = res[1];
+      renderHistory(); renderGauge();
+    });
+    apiSoft("/hosts/" + encodeURIComponent(name) + "/details", function () { return demo.details(name); }, null).then(function (d) {
+      if (state.selected !== name) return;
+      state.details = d;
+      renderNodeHead(); renderGauge(); renderSystem(); renderCores(); renderProcs(); renderServices();
+    });
+    apiSoft("/alerts?limit=20&host=" + encodeURIComponent(name), function () { return demo.alerts().filter(function (a) { return a.host === name; }); }).then(function (list) {
+      if (state.selected !== name) return;
+      state.nodeAlerts = list; renderNodeAlerts();
     });
   }
 
   function loadTraces() {
+    var m = Math.min(state.minutes, 1440);
     state.hosts.forEach(function (h) {
-      fetchRows(h.host).then(function (rows) { state.traces[h.host] = rows; renderTraces(); });
+      api("/metrics?host=" + encodeURIComponent(h.host) + "&minutes=" + m, function () { return demo.metrics(h.host, m); })
+        .then(function (rows) { state.traces[h.host] = rows; if (state.view === "overview") { renderTraces(); renderCards(); } });
     });
   }
 
   function loadSmart() {
-    api("/anomalies/now", demo.anomNow).then(function (list) { state.anomNow = list; renderBanner(); });
-    api("/forecast", demo.forecast).then(function (list) { state.forecast = list; renderForecast(); renderBanner(); });
+    apiSoft("/anomalies/now", demo.anomNow).then(function (list) { state.anomNow = list; renderBanner(); });
+    apiSoft("/forecast", demo.forecast).then(function (list) { state.forecast = list; renderForecast(); renderBanner(); if (state.view === "node") renderSystem(); });
   }
 
   function loadAlerts() {
-    return api("/alerts", demo.alerts).then(function (list) { state.alerts = list; renderKpis(); renderAlerts(); });
+    return api("/alerts?limit=200", demo.alerts).then(function (list) {
+      state.alerts = list;
+      renderBadge(); renderBanner(); renderKpis(); renderRecent();
+      if (state.view === "alerts") renderAlerts();
+    });
+  }
+
+  function loadRules() {
+    return apiSoft("/rules", demo.rules, null).then(function (data) {
+      if (data) state.rules = data;
+      if (state.view === "rules") renderRules();
+      if (state.view === "node") renderHistory();
+    });
+  }
+
+  /* ---------------- routing ---------------- */
+  function parseRoute() {
+    var parts = location.hash.replace(/^#\/?/, "").split("/");
+    if (parts[0] === "node" && parts[1]) return { view: "node", host: decodeURIComponent(parts.slice(1).join("/")) };
+    if (parts[0] === "alerts" || parts[0] === "rules") return { view: parts[0] };
+    return { view: "overview" };
+  }
+
+  function openNode(name) { location.hash = "#/node/" + encodeURIComponent(name); }
+
+  function applyRoute() {
+    var r = parseRoute();
+    state.view = r.view;
+    ["overview", "node", "alerts", "rules"].forEach(function (v) { $("view-" + v).hidden = v !== r.view; });
+    document.querySelectorAll("nav a").forEach(function (a) {
+      if (a.dataset.view === (r.view === "node" ? "overview" : r.view)) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+    $("tip").hidden = true;
+    if (r.view === "node") {
+      if (state.selected !== r.host) { state.details = null; state.rows = []; state.anoms = []; state.nodeAlerts = []; }
+      state.selected = r.host;
+      document.title = r.host + " · LinuxWatch";
+      renderNode(); loadNode();
+    } else {
+      document.title = "LinuxWatch";
+      if (r.view === "overview") { renderKpis(); renderForecast(); renderCards(); renderTraces(); renderRecent(); }
+      if (r.view === "alerts") { renderAlerts(); loadAlerts(); }
+      if (r.view === "rules") { renderRules(); loadRules(); }
+    }
+    renderRack();
+    window.scrollTo(0, 0);
   }
 
   /* ---------------- live ---------------- */
@@ -661,7 +1081,7 @@ td.n,th.n{text-align:right}
     var ws;
     try { ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws"); }
     catch (e) { startPolling(); return; }
-    ws.onopen = function () { stopPolling(); setLive(true, "live · ws"); };
+    ws.onopen = function () { stopPolling(); setLive(true, "live"); };
     ws.onmessage = function (ev) { try { setHosts(JSON.parse(ev.data)); } catch (e) {} };
     ws.onclose = function () { if (state.demo) return; setLive(false, "reconnecting"); startPolling(); setTimeout(connectWS, 5000); };
     ws.onerror = function () { ws.close(); };
@@ -670,27 +1090,37 @@ td.n,th.n{text-align:right}
   function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
 
   /* ---------------- controls ---------------- */
-  function selectHost(name) { state.selected = name; loadDetail(); renderTraces(); }
-  function showView(name) {
-    state.view = name;
-    var ops = name === "ops";
-    $("tab-ops").setAttribute("aria-selected", ops);
-    $("tab-alerts").setAttribute("aria-selected", !ops);
-    $("view-ops").hidden = !ops;
-    $("view-alerts").hidden = ops;
-    if (!ops) loadAlerts();
-  }
   function moveSelection(step) {
     var list = visibleHosts(); if (!list.length) return;
     var i = list.map(function (h) { return h.host; }).indexOf(state.selected);
-    selectHost(list[Math.max(0, Math.min(list.length - 1, i + step))].host);
+    if (state.view !== "node" || i === -1) i = step > 0 ? -1 : list.length;
+    openNode(list[Math.max(0, Math.min(list.length - 1, i + step))].host);
   }
 
-  $("tab-ops").onclick = function () { showView("ops"); };
-  $("tab-alerts").onclick = function () { showView("alerts"); };
-  $("nodes").addEventListener("click", function (e) { var b = e.target.closest(".node"); if (b) selectHost(b.dataset.host); });
-  $("banner").addEventListener("click", function (e) { var b = e.target.closest(".item"); if (b) { showView("ops"); selectHost(b.dataset.host); } });
-  $("traces").addEventListener("click", function (e) { var b = e.target.closest(".trace"); if (b) selectHost(b.dataset.host); });
+  function renderRanges() {
+    document.querySelectorAll(".range").forEach(function (seg) {
+      seg.innerHTML = RANGES.map(function (r) { return '<button data-min="' + r[0] + '" aria-pressed="' + (r[0] === state.minutes) + '">' + r[1] + '</button>'; }).join("");
+    });
+  }
+
+  function hostClick(sel) {
+    return function (e) { var b = e.target.closest(sel); if (b && b.dataset.host) openNode(b.dataset.host); };
+  }
+
+  $("units").addEventListener("click", hostClick(".unit"));
+  $("cards").addEventListener("click", hostClick(".card"));
+  $("traces").addEventListener("click", hostClick(".trace"));
+  $("banner").addEventListener("click", hostClick(".item"));
+  $("recent").addEventListener("click", hostClick(".hostlink"));
+  $("alertRows").addEventListener("click", hostClick(".hostlink"));
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest(".range button"); if (!b) return;
+    state.minutes = Number(b.dataset.min);
+    renderRanges();
+    if (state.view === "node") loadNode();
+    loadTraces();
+  });
 
   $("legend").addEventListener("click", function (e) {
     var b = e.target.closest("button"); if (!b) return;
@@ -701,16 +1131,56 @@ td.n,th.n{text-align:right}
     $("net").innerHTML = netChart(state.rows);
   });
 
+  $("alertFilter").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    state.alertFilter = b.dataset.f;
+    this.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+    renderAlerts();
+  });
+  $("alertHost").addEventListener("change", function (e) { state.alertHost = e.target.value; renderAlerts(); });
+
+  $("ruleRows").addEventListener("input", function (e) {
+    var tr = e.target.closest("tr"); if (!tr) return;
+    tr.classList.add("dirty");
+    tr.querySelector('[data-act="save"]').disabled = false;
+  });
+  $("ruleRows").addEventListener("change", function (e) {
+    var tr = e.target.closest("tr"); if (!tr) return;
+    tr.classList.add("dirty");
+    tr.querySelector('[data-act="save"]').disabled = false;
+    if (e.target.dataset.f === "metric") {
+      // swap the limit field's unit (and wait field) to match the new metric
+      var r = readRule(tr), id = tr.dataset.id, fresh;
+      r.threshold = e.target.value === "offline" ? 180 : (e.target.value === "load_1" ? 4 : 80);
+      r.duration = e.target.value === "offline" ? 0 : 300;
+      tr.outerHTML = ruleRow(Object.assign({ id: id ? Number(id) : null }, r));
+      fresh = $("ruleRows").querySelector('tr[data-id="' + (id || "") + '"]');
+      if (fresh) { fresh.classList.add("dirty"); fresh.querySelector('[data-act="save"]').disabled = false; }
+    }
+    if (e.target.dataset.f === "enabled") tr.classList.toggle("off", !e.target.checked);
+  });
+  $("ruleRows").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-act]"); if (!b) return;
+    var tr = b.closest("tr");
+    if (b.dataset.act === "save") saveRule(tr); else deleteRule(tr);
+  });
+  $("addRule").addEventListener("click", function () {
+    if ($("ruleRows").querySelector('tr[data-id=""]')) return;
+    var empty = $("ruleRows").querySelector(".empty"); if (empty) empty.parentNode.remove();
+    $("ruleRows").insertAdjacentHTML("beforeend", ruleRow({ id: null, metric: "cpu", threshold: 80, duration: 300, level: "warning", host: null, enabled: 1 }));
+    $("ruleRows").querySelector('tr[data-id=""] [data-f="threshold"]').focus();
+  });
+  $("token").addEventListener("input", function (e) { try { sessionStorage.setItem("lw-token", e.target.value); } catch (err) {} });
+  try { $("token").value = sessionStorage.getItem("lw-token") || ""; } catch (err) {}
+
   /* tooltips: hover on desktop, tap on touch */
   var tip = $("tip");
   function showTip(el, x, y) {
     tip.textContent = el.getAttribute("data-tip");
     tip.hidden = false;
     var w = tip.offsetWidth, h = tip.offsetHeight;
-    var left = x + 14 + w > window.innerWidth ? x - w - 14 : x + 14;
-    var top = y + 14 + h > window.innerHeight ? y - h - 14 : y + 14;
-    tip.style.left = Math.max(4, left) + "px";
-    tip.style.top = Math.max(4, top) + "px";
+    tip.style.left = Math.max(4, x + 14 + w > window.innerWidth ? x - w - 14 : x + 14) + "px";
+    tip.style.top = Math.max(4, y + 14 + h > window.innerHeight ? y - h - 14 : y + 14) + "px";
   }
   document.addEventListener("mousemove", function (e) {
     var el = e.target.closest ? e.target.closest("[data-tip]") : null;
@@ -722,49 +1192,42 @@ td.n,th.n{text-align:right}
   });
   document.addEventListener("scroll", function () { tip.hidden = true; }, true);
 
-  $("filter").addEventListener("input", function (e) { state.filter = e.target.value; renderNodes(); renderTraces(); });
-  $("range").addEventListener("click", function (e) {
-    var b = e.target.closest("button"); if (!b) return;
-    state.minutes = Number(b.dataset.min);
-    this.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
-    loadDetail(); loadTraces();
-  });
-  $("alertFilter").addEventListener("click", function (e) {
-    var b = e.target.closest("button"); if (!b) return;
-    state.alertFilter = b.dataset.f;
-    this.querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
-    renderAlerts();
-  });
+  $("filter").addEventListener("input", function (e) { state.filter = e.target.value; renderRack(); if (state.view === "overview") { renderCards(); renderTraces(); } });
   document.addEventListener("keydown", function (e) {
-    if (e.target.tagName === "INPUT") {
-      if (e.key === "Escape") { e.target.value = ""; state.filter = ""; e.target.blur(); renderNodes(); renderTraces(); }
+    var tag = e.target.tagName;
+    if (tag === "INPUT" || tag === "SELECT") {
+      if (e.key === "Escape" && e.target.id === "filter") { e.target.value = ""; state.filter = ""; e.target.blur(); renderRack(); renderCards(); renderTraces(); }
       return;
     }
-    if (e.key === "1") showView("ops");
-    else if (e.key === "2") showView("alerts");
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "1") location.hash = "#/";
+    else if (e.key === "2") location.hash = "#/alerts";
+    else if (e.key === "3") location.hash = "#/rules";
     else if (e.key === "/") { e.preventDefault(); $("filter").focus(); }
-    else if (state.view === "ops" && (e.key === "j" || e.key === "ArrowDown")) { e.preventDefault(); moveSelection(1); }
-    else if (state.view === "ops" && (e.key === "k" || e.key === "ArrowUp")) { e.preventDefault(); moveSelection(-1); }
-    else if (e.key === "Enter" && state.view === "ops") loadDetail();
+    else if (e.key === "Escape" && state.view === "node") location.hash = "#/";
+    else if (e.key === "j" || (e.key === "ArrowDown" && state.view === "node")) { e.preventDefault(); moveSelection(1); }
+    else if (e.key === "k" || (e.key === "ArrowUp" && state.view === "node")) { e.preventDefault(); moveSelection(-1); }
   });
+  window.addEventListener("hashchange", applyRoute);
 
-  setInterval(function () { $("clock").textContent = new Date().toTimeString().slice(0, 8); }, 1000);
+  function tickClock() { $("clock").textContent = new Date().toTimeString().slice(0, 8); }
+  setInterval(tickClock, 1000); tickClock();
 
   /* ---------------- start ---------------- */
   if (location.protocol === "file:" || /claude\.ai|claudeusercontent|vercel\.app/.test(location.host)) enterDemo();
+  renderRanges();
   api("/hosts", demo.hosts).then(function (list) {
     setHosts(list);
-    loadAlerts();
-    loadTraces();
-    loadSmart();
+    applyRoute();
+    loadAlerts(); loadRules(); loadTraces(); loadSmart();
     setInterval(loadTraces, 60000);
     setInterval(loadSmart, 60000);
+    setInterval(function () { if (state.view === "node") loadNode(); }, 30000);
     if (state.demo) {
       setInterval(function () { setHosts(demo.hosts()); }, 5000);
     } else {
       connectWS();
-      setInterval(loadAlerts, 30000);
-      setInterval(loadDetail, 60000);
+      setInterval(loadAlerts, 15000);
     }
   });
 })();

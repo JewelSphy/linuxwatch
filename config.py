@@ -36,3 +36,5 @@ API_KEYS = {}
 if config.has_section("api_keys"):
    for key, host in config.items("api_keys"):
       API_KEYS[key.strip()] = host.strip()
+# protects rule editing in the dashboard; empty = anyone who can open the dashboard may edit
+ADMIN_TOKEN = config.get("dashboard", "admin_token", fallback="").strip()
