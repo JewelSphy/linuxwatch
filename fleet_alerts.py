@@ -33,6 +33,10 @@ breach_since = {}
 started_at = time.time()
 
 
+class MuteIn(BaseModel):
+   minutes: float = Field(default=60, gt=0, le=60 * 24 * 30)
+
+
 class RuleIn(BaseModel):
    metric: str
    threshold: float = Field(ge=0)
@@ -92,6 +96,19 @@ def notify(text):
    threading.Thread(target=send_discord, args=(text,), daemon=True).start()
 
 
+def is_muted(conn, host, rule_id):
+   row = conn.execute("SELECT until FROM alert_mutes WHERE host = ? AND rule_id = ?", (host, rule_id)).fetchone()
+   return row is not None and row[0] > time.time()
+
+
+def tell(conn, host, rule, text, info=False):
+   """Log every alert change; send to Discord unless this host + rule is muted."""
+   muted = is_muted(conn, host, rule["id"])
+   (log.info if info else log.warning)(text + (" (muted)" if muted else ""))
+   if not muted:
+      notify(text)
+
+
 def open_alert_id(conn, host, rule_id):
    row = conn.execute(
       "SELECT id FROM fleet_alerts WHERE host = ? AND rule_id = ? AND resolved_at IS NULL",
@@ -106,16 +123,14 @@ def fire(conn, host, rule, value, ts):
    """, (host, rule["id"], rule["metric"], rule["level"], value, rule["threshold"], ts))
    label = METRICS[rule["metric"]][0]
    text = f"{rule['level'].upper()}: {host} {label} is {fmt_value(rule['metric'], value)} (limit {fmt_value(rule['metric'], rule['threshold'])})"
-   log.warning(text)
-   notify(text)
+   tell(conn, host, rule, text)
 
 
 def resolve(conn, alert_id, host, rule, value, ts):
    conn.execute("UPDATE fleet_alerts SET resolved_at = ?, resolved_value = ? WHERE id = ?", (ts, value, alert_id))
    label = METRICS[rule["metric"]][0]
    text = f"RESOLVED: {host} {label} back to {fmt_value(rule['metric'], value)}"
-   log.info(text)
-   notify(text)
+   tell(conn, host, rule, text, info=True)
 
 
 def check_rule(conn, host, rule, value, ts):
@@ -181,12 +196,16 @@ def utc_text(ts):
 
 
 def fleet_alert_rows(limit, host=None):
-   sql = "SELECT * FROM fleet_alerts"
-   args = []
+   sql = """
+       SELECT a.*, m.until AS muted_until
+       FROM fleet_alerts a
+       LEFT JOIN alert_mutes m ON m.host = a.host AND m.rule_id = a.rule_id AND m.until > ?
+   """
+   args = [time.time()]
    if host:
-      sql += " WHERE host = ?"
+      sql += " WHERE a.host = ?"
       args.append(host)
-   sql += " ORDER BY fired_at DESC LIMIT ?"
+   sql += " ORDER BY a.fired_at DESC LIMIT ?"
    args.append(limit)
    with connect(SERVER_DB_PATH) as conn:
       rows = conn.execute(sql, args).fetchall()
@@ -203,20 +222,23 @@ def fleet_alert_rows(limit, host=None):
          "fired_at": utc_text(r["fired_at"]),
          "resolved_at": utc_text(r["resolved_at"]),
          "resolved_value": r["resolved_value"],
+         "acked_at": utc_text(r["acked_at"]),
+         "muted_until": r["muted_until"],
       }
       for r in rows
    ]
 
 
 def open_counts():
-   """host -> {"count": open alerts, "level": worst level}, used by /hosts."""
+   """host -> {"count": open alerts, "level": worst level}, used by /hosts. Acked and muted alerts don't count."""
    with connect(SERVER_DB_PATH) as conn:
       rows = conn.execute("""
-          SELECT host, COUNT(*), MAX(level = 'critical')
-          FROM fleet_alerts
-          WHERE resolved_at IS NULL
-          GROUP BY host
-      """).fetchall()
+          SELECT a.host, COUNT(*), MAX(a.level = 'critical')
+          FROM fleet_alerts a
+          LEFT JOIN alert_mutes m ON m.host = a.host AND m.rule_id = a.rule_id AND m.until > ?
+          WHERE a.resolved_at IS NULL AND a.acked_at IS NULL AND m.until IS NULL
+          GROUP BY a.host
+      """, (time.time(),)).fetchall()
    return {host: {"count": n, "level": "critical" if crit else "warning"} for host, n, crit in rows}
 
 
@@ -261,6 +283,7 @@ def delete_rule(rule_id: int, x_admin_token: Optional[str] = Header(None)):
       if not conn.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,)).rowcount:
          raise HTTPException(status_code=404, detail="No such rule")
       close_rule_alerts(conn, rule_id)
+      conn.execute("DELETE FROM alert_mutes WHERE rule_id = ?", (rule_id,))
    forget_breaches(rule_id)
    return {"ok": True}
 
@@ -273,3 +296,43 @@ def close_rule_alerts(conn, rule_id):
 def forget_breaches(rule_id):
    for key in [k for k in breach_since if k[1] == rule_id]:
       breach_since.pop(key, None)
+
+
+def fleet_alert(conn, alert_id):
+   """Look up a fleet alert by its API id ("f12"); monitor.py alerts ("m3") can't be acked or muted."""
+   if not alert_id.startswith("f") or not alert_id[1:].isdigit():
+      raise HTTPException(status_code=400, detail="Only fleet alerts (id starting with f) can be acknowledged or muted")
+   row = conn.execute("SELECT * FROM fleet_alerts WHERE id = ?", (int(alert_id[1:]),)).fetchone()
+   if row is None:
+      raise HTTPException(status_code=404, detail="No such alert")
+   return row
+
+
+@router.post("/alerts/{alert_id}/ack")
+def ack_alert(alert_id: str, x_admin_token: Optional[str] = Header(None)):
+   require_admin(x_admin_token)
+   with connect(SERVER_DB_PATH) as conn:
+      row = fleet_alert(conn, alert_id)
+      conn.execute("UPDATE fleet_alerts SET acked_at = COALESCE(acked_at, ?) WHERE id = ?", (time.time(), row["id"]))
+   return {"ok": True}
+
+
+@router.post("/alerts/{alert_id}/mute")
+def mute_alert(alert_id: str, mute: MuteIn, x_admin_token: Optional[str] = Header(None)):
+   """Silence Discord for this node + rule for a while; the alert itself still opens and resolves."""
+   require_admin(x_admin_token)
+   until = time.time() + mute.minutes * 60
+   with connect(SERVER_DB_PATH) as conn:
+      row = fleet_alert(conn, alert_id)
+      conn.execute("INSERT OR REPLACE INTO alert_mutes (host, rule_id, until) VALUES (?, ?, ?)",
+                   (row["host"], row["rule_id"], until))
+   return {"ok": True, "muted_until": until}
+
+
+@router.delete("/alerts/{alert_id}/mute")
+def unmute_alert(alert_id: str, x_admin_token: Optional[str] = Header(None)):
+   require_admin(x_admin_token)
+   with connect(SERVER_DB_PATH) as conn:
+      row = fleet_alert(conn, alert_id)
+      conn.execute("DELETE FROM alert_mutes WHERE host = ? AND rule_id = ?", (row["host"], row["rule_id"]))
+   return {"ok": True}

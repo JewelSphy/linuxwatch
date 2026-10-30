@@ -180,7 +180,7 @@ def monitor_alerts(limit):
       except Exception:
          # no alerts table yet (monitor.py has not created one)
          return []
-   return [dict(row, id="m" + str(row["id"]), source="monitor", host="local", unit="%") for row in rows]
+   return [dict(row, id="m" + str(row["id"]), source="monitor", host="local", unit="%", acked_at=None, muted_until=None) for row in rows]
 
 
 # one query feeds every websocket client instead of one query per client per push

@@ -1,8 +1,12 @@
+import io
+import re
+import csv
 import time
 import logging
 import threading
+from datetime import datetime, timezone
 from fastapi import APIRouter
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from config import SERVER_DB_PATH, INTERVAL, config
 from db import connect
 
@@ -139,3 +143,103 @@ def prometheus():
       lines.append(f"# TYPE {name} gauge")
       lines.extend(name + v for v in values[name])
    return "\n".join(lines) + "\n"
+
+
+# ---------- uptime ----------
+
+UP_GAP = INTERVAL * 3   # same rule as /hosts: no reading for 3 intervals = down
+UPTIME_RANGES = {"day": 1, "week": 7, "month": 30}
+
+
+def first_seen(conn, host):
+   raw = conn.execute("SELECT MIN(ts) FROM host_metrics WHERE host = ?", (host,)).fetchone()[0]
+   hourly = conn.execute("SELECT MIN(hour) FROM host_metrics_hourly WHERE host = ?", (host,)).fetchone()[0]
+   return min([t for t in (raw, hourly) if t is not None], default=None)
+
+
+def raw_downtime(conn, host, start, end):
+   """Seconds between start and end with no reading for longer than UP_GAP."""
+   before = conn.execute("SELECT MAX(ts) FROM host_metrics WHERE host = ? AND ts < ?", (host, start)).fetchone()[0]
+   times = [row[0] for row in conn.execute(
+      "SELECT ts FROM host_metrics WHERE host = ? AND ts >= ? AND ts < ? ORDER BY ts", (host, start, end))]
+   prev = before if before is not None else start
+   down = 0.0
+   for t in times + [end]:
+      down += max(0.0, t - max(prev + UP_GAP, start))
+      prev = max(prev, t)
+   return down
+
+
+def hourly_downtime(conn, host, start, end):
+   """Older than the raw data: an hour with fewer readings than expected counts as partly down."""
+   expected = 3600 / INTERVAL
+   samples = dict(conn.execute(
+      "SELECT hour, samples FROM host_metrics_hourly WHERE host = ? AND hour >= ? AND hour < ?",
+      (host, hour_floor(start), end)).fetchall())
+   down = 0.0
+   hour = hour_floor(start)
+   while hour < end:
+      span = min(hour + 3600, end) - max(hour, start)
+      down += span * (1 - min(1.0, samples.get(hour, 0) / expected))
+      hour += 3600
+   return down
+
+
+def uptime_percent(conn, host, days, now):
+   first = first_seen(conn, host)
+   if first is None:
+      return None
+   since = now - days * 86400
+   start = max(since, first)   # a new node is only measured from its first reading
+   if now - start <= 0:
+      return 100.0
+   raw_start = max(start, hour_floor(now - RAW_DAYS * 86400))
+   down = raw_downtime(conn, host, raw_start, now)
+   if start < raw_start:
+      down += hourly_downtime(conn, host, start, raw_start)
+   return round(max(0.0, 100 * (1 - down / (now - start))), 2)
+
+
+@router.get("/uptime")
+def uptime():
+   now = time.time()
+   with connect(SERVER_DB_PATH) as conn:
+      hosts = [row[0] for row in conn.execute("SELECT DISTINCT host FROM host_metrics ORDER BY host")]
+      return [
+         dict({"host": host}, **{name: uptime_percent(conn, host, days, now) for name, days in UPTIME_RANGES.items()})
+         for host in hosts
+      ]
+
+
+# ---------- csv export ----------
+
+RAW_COLUMNS = ["ts", "cpu", "ram", "disk", "swap", "load_1", "net_in", "net_out"]
+HOURLY_COLUMNS = ["hour", "samples", "cpu_avg", "cpu_max", "ram_avg", "ram_max", "disk_avg", "disk_max",
+                  "swap_avg", "load_avg", "net_in_sum", "net_out_sum"]
+
+
+def utc_iso(ts):
+   return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+@router.get("/export.csv")
+def export_csv(host: str, minutes: int = 60):
+   """Download one host's history; ranges longer than the raw retention use hourly rollups."""
+   since = time.time() - minutes * 60
+   hourly = minutes > RAW_DAYS * 1440
+   table, columns, time_col = ("host_metrics_hourly", HOURLY_COLUMNS, "hour") if hourly else ("host_metrics", RAW_COLUMNS, "ts")
+   with connect(SERVER_DB_PATH) as conn:
+      rows = conn.execute(
+         f"SELECT {', '.join(columns)} FROM {table} WHERE host = ? AND {time_col} >= ? ORDER BY {time_col}",
+         (host, since)).fetchall()
+
+   out = io.StringIO()
+   writer = csv.writer(out)
+   writer.writerow(["time_utc"] + columns)
+   for row in rows:
+      writer.writerow([utc_iso(row[0])] + list(row))
+
+   safe = re.sub(r"[^A-Za-z0-9._-]", "_", host)
+   name = f"linuxwatch-{safe}-{'hourly' if hourly else 'raw'}-{minutes}m.csv"
+   return Response(out.getvalue(), media_type="text/csv",
+                   headers={"Content-Disposition": f'attachment; filename="{name}"'})

@@ -99,6 +99,7 @@ nav a .badge{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight
   nav{flex-direction:row;overflow-x:auto}
   nav a{flex:1;justify-content:center;padding:9px 10px}
   nav a[aria-current="page"]{box-shadow:inset 0 -2px 0 var(--cyan)}
+  nav a .k{display:none}
   .rackhead,.units,.rackfoot{display:none}
   .main{padding:14px 16px 28px}
   .g3,.g2,.g2e{grid-template-columns:minmax(0,1fr)}
@@ -138,6 +139,14 @@ nav a .badge{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight
 .bars .t i{position:absolute;inset:0 auto 0 0}
 .bars .n{text-align:right}
 .card svg{display:block;width:100%;height:34px}
+.uptime{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;border-top:1px solid var(--edge);padding-top:8px}
+.uptime span{display:flex;flex-direction:column;font-size:10px;color:var(--muted)}
+.uptime b{font-weight:500;font-size:13px}
+.acts{display:flex;gap:6px;justify-content:flex-end;align-items:center}
+.acts .btn{min-height:26px;padding:2px 9px;font-size:11px}
+.muted-note{color:var(--violet);font-size:11px}
+.acked td{opacity:.6}
+.acked td.keep{opacity:1}
 
 /* charts */
 .chart svg{display:block;width:100%;height:auto}
@@ -169,7 +178,7 @@ nav a .badge{margin-left:auto;font-family:var(--mono);font-size:11px;font-weight
 .nodehead .lamp{width:14px;height:14px;grid-row:1/3}
 .nodehead h1{margin:0;font-family:var(--label);font-weight:700;font-size:40px;line-height:1;letter-spacing:.02em;overflow-wrap:anywhere}
 .nodehead .os{color:var(--muted);font-size:12px}
-.facts{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--edge)}
+.facts{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--edge)}
 .fact .v{font-size:15px;font-weight:500}
 .fact .k{color:var(--muted);font-size:11px}
 .back{color:var(--muted);text-decoration:none;font-size:12px}
@@ -203,7 +212,7 @@ th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--edge);white
 tr:last-child td{border-bottom:0}
 th{color:var(--muted);font-weight:500;font-size:11px}
 td.n,th.n{text-align:right}
-.alerts-table{min-width:760px}
+.alerts-table{min-width:900px}
 .tag{font-weight:700;font-size:11px;padding:1px 7px;border:1px solid currentColor}
 .pbar{display:inline-block;width:60px;height:5px;background:#16205a;vertical-align:middle;margin-left:8px;position:relative}
 .pbar i{position:absolute;inset:0 auto 0 0;background:var(--cyan)}
@@ -301,6 +310,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
       <div class="pagehead">
         <a class="back" href="#/">← fleet overview</a>
         <span class="spacer"></span>
+        <a class="btn" id="csv" href="#" download>Download CSV</a>
         <div class="seg range" role="group" aria-label="Time range"></div>
       </div>
       <div class="panel nodehead" id="nodeHead"></div>
@@ -350,6 +360,11 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     <!-- alerts -->
     <section id="view-alerts" class="grid" hidden>
       <div class="pagehead"><h1>Alerts</h1><span class="sub">every alert from every node, newest first</span></div>
+      <p class="explain">Acknowledge an alert to say you've seen it: it leaves the problem banner but stays open until the value recovers. Mute stops Discord messages for that node and rule for an hour, including new alerts.</p>
+      <div class="filters" id="tokenRow2" hidden>
+        <label for="token2" class="c-muted">Admin token</label>
+        <input class="field token-in" id="token2" type="password" autocomplete="off" placeholder="from config.ini [dashboard]">
+      </div>
       <div class="panel">
         <div class="ph">
           <div class="filters">
@@ -364,10 +379,11 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
           <span class="m" id="alertCount"></span>
         </div>
         <div class="tbl"><table class="alerts-table">
-          <thead><tr><th>state</th><th>node</th><th>metric</th><th class="n">value</th><th class="n">limit</th><th>fired (utc)</th><th>resolved (utc)</th><th class="n">lasted</th></tr></thead>
+          <thead><tr><th>state</th><th>node</th><th>metric</th><th class="n">value</th><th class="n">limit</th><th>fired (utc)</th><th>resolved (utc)</th><th class="n">lasted</th><th class="n">actions</th></tr></thead>
           <tbody id="alertRows"></tbody>
         </table></div>
       </div>
+      <span class="msg" id="alertMsg" role="status"></span>
     </section>
 
     <!-- rules -->
@@ -376,7 +392,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
       <p class="explain">An alert fires when a node stays at or above the limit for the whole wait time, and resolves by itself once the value drops back. Each alert is sent to Discord once when it fires and once when it resolves. Rules apply to every node unless you pick one.</p>
       <div class="filters" id="tokenRow" hidden>
         <label for="token" class="c-muted">Admin token</label>
-        <input class="field" id="token" type="password" autocomplete="off" placeholder="from config.ini [dashboard]">
+        <input class="field token-in" id="token" type="password" autocomplete="off" placeholder="from config.ini [dashboard]">
       </div>
       <div class="panel">
         <div class="tbl"><table class="rules-table">
@@ -406,7 +422,8 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
   var state = {
     demo: false, hosts: [], alerts: [], rules: { metrics: METRIC_FALLBACK, rules: [], protected: false },
     view: "overview", selected: null, minutes: 60, filter: "", alertFilter: "all", alertHost: "",
-    traces: {}, rows: [], net: { in: true, out: true }, anoms: [], anomNow: [], forecast: [], details: null, nodeAlerts: []
+    traces: {}, rows: [], net: { in: true, out: true }, anoms: [], anomNow: [], forecast: [], details: null, nodeAlerts: [],
+    uptime: {}, token: ""
   };
 
   /* ---------------- helpers ---------------- */
@@ -440,6 +457,10 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     if (name === "offline") return fmtAgo(v);
     return (name === "load_1" ? Number(v).toFixed(2) : Number(v).toFixed(1)) + metricInfo(name).unit;
   }
+  function needsAttention(a) { return !a.resolved_at && !a.acked_at && !(a.muted_until && a.muted_until * 1000 > Date.now()); }
+  function isMuted(a) { return !!(a.muted_until && a.muted_until * 1000 > Date.now()); }
+  function upColor(v) { return v == null ? COL.muted : (v < 95 ? COL.red : (v < 99 ? COL.amber : COL.cyan)); }
+  function fmtUp(v) { return v == null ? "—" : (v >= 99.995 ? "100" : v.toFixed(v >= 99 ? 2 : 1)) + "%"; }
   function selectedHost() { return state.hosts.filter(function (h) { return h.host === state.selected; })[0] || null; }
   function bar(v, color) { return '<i style="width:' + clamp(v) + '%;background:' + color + ';box-shadow:0 0 8px ' + color + '"></i>'; }
   function cpuLimit() {
@@ -508,7 +529,16 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
         { host: "web-01", status: "stable", disk_now: 74, slope_per_day: 0.02 }
       ];
     },
-    alerts: function () {
+    uptime: function () {
+      return [
+        { host: "linux-monitor", day: 100, week: 99.97, month: 99.91 },
+        { host: "web-01", day: 99.31, week: 99.82, month: 99.6 },
+        { host: "db-01", day: 100, week: 100, month: 99.99 },
+        { host: "worker-01", day: 82.5, week: 96.4, month: 98.1 }
+      ];
+    },
+    alerts: function () { return demoAlerts; },
+    alertsSeed: function () {
       return [
         { id: "f6", host: "worker-01", name: "offline", level: "critical", value: 240, threshold: 180, unit: "s", fired_at: "2026-10-14 06:20:03", resolved_at: null, resolved_value: null },
         { id: "f5", host: "web-01", name: "cpu", level: "warning", value: 86.2, threshold: 80, unit: "%", fired_at: "2026-10-14 06:12:03", resolved_at: null, resolved_value: null },
@@ -519,6 +549,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     },
     rules: function () { return { metrics: METRIC_FALLBACK, protected: false, rules: demoRules }; }
   };
+  var demoAlerts = demo.alertsSeed();
 
   /* ---------------- api ---------------- */
   function api(path, fallback) {
@@ -533,12 +564,12 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
       .catch(function () { return empty === undefined ? [] : empty; });
   }
   function send(method, path, body) {
-    var headers = { "Content-Type": "application/json" }, token = $("token").value.trim();
+    var headers = { "Content-Type": "application/json" }, token = state.token.trim();
     if (token) headers["X-Admin-Token"] = token;
     return fetch(path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined })
       .then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (data) {
-          if (!r.ok) throw new Error(r.status === 401 ? "Enter the admin token from config.ini to change rules." : (data.detail || "Server said " + r.status));
+          if (!r.ok) throw new Error(r.status === 401 ? "Enter the admin token from config.ini to make changes." : (data.detail || "Server said " + r.status));
           return data;
         });
       });
@@ -686,6 +717,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     state.alerts.forEach(function (a) {
       if (a.resolved_at) return;
       alerted[a.host] = true;
+      if (!needsAttention(a)) return;
       items.push({ host: a.host, text: (a.name === "offline" ? "offline" : metricInfo(a.name).label + " at " + fmtMetric(a.name, a.value) + ", limit " + fmtMetric(a.name, a.threshold)), lv: a.level === "critical" ? "crit" : "warn" });
     });
     state.hosts.forEach(function (h) {
@@ -709,7 +741,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
   }
 
   function renderBadge() {
-    var open = state.alerts.filter(function (a) { return !a.resolved_at; }).length, b = $("navBadge");
+    var open = state.alerts.filter(needsAttention).length, b = $("navBadge");
     b.hidden = !open; b.textContent = open;
   }
 
@@ -754,9 +786,16 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
       var row = function (k, v) { return '<span class="l">' + k + '</span><span class="t">' + (off ? "" : bar(v, levelColor(v))) + '</span><span class="n" style="color:' + (off ? COL.off : levelColor(v)) + '">' + (off ? "—" : Math.round(v) + "%") + '</span>'; };
       return '<button class="panel card" data-host="' + esc(h.host) + '" aria-label="Open ' + esc(h.host) + '">' +
         '<span class="top"><span class="lamp ' + lv + '"></span><span style="min-width:0"><span class="name" style="display:block">' + esc(h.host) + '</span><span class="seen">' + (off ? "offline, last seen " : "seen ") + fmtAgo(h.last_seen_seconds_ago) + ' ago</span></span>' + alertTag + '</span>' +
-        '<span class="bars">' + row("cpu", h.cpu) + row("ram", h.ram) + row("disk", h.disk) + '</span>' +
+        '<span class="bars">' + row("cpu", h.cpu) + row("ram", h.ram) + row("disk", h.disk) + '</span>' + uptimeLine(h.host) +
         spark(state.traces[h.host], off ? COL.off : levelColor(h.cpu), 240, 34) + '</button>';
     }).join("");
+  }
+
+  function uptimeLine(host) {
+    var u = state.uptime[host];
+    if (!u) return "";
+    var part = function (label, v) { return '<span><b style="color:' + upColor(v) + '">' + fmtUp(v) + '</b>uptime ' + label + '</span>'; };
+    return '<span class="uptime">' + part("24h", u.day) + part("7d", u.week) + part("30d", u.month) + '</span>';
   }
 
   function renderTraces() {
@@ -772,7 +811,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
   function alertLine(a, withHost) {
     var open = !a.resolved_at, color = open ? (a.level === "critical" ? COL.red : COL.amber) : COL.cyan;
     var what = a.name === "offline" ? "went offline" : metricInfo(a.name).label + " " + fmtMetric(a.name, a.value);
-    return '<div class="row"><span class="tag" style="color:' + color + '">' + (open ? a.level : "resolved") + '</span>' +
+    return '<div class="row"><span class="tag" style="color:' + color + '">' + (open ? (a.acked_at ? "acked" : a.level) : "resolved") + '</span>' +
       '<span>' + (withHost ? '<button class="hostlink" data-host="' + esc(a.host) + '">' + esc(a.host) + '</button> ' : "") + esc(what) + '</span>' +
       '<span class="when">' + esc((a.fired_at || "").slice(5, 16)) + '</span></div>';
   }
@@ -794,7 +833,8 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
       ["cpu cores", d ? d.cpu_count : "—"],
       ["memory", d ? fmtBytes(d.ram_used) + " / " + fmtBytes(d.ram_total) : "—"],
       ["disk /", d ? fmtBytes(d.disk_used) + " / " + fmtBytes(d.disk_total) : "—"],
-      ["open alerts", h.open_alerts || 0]
+      ["uptime 24h / 7d / 30d", state.uptime[h.host] ? [state.uptime[h.host].day, state.uptime[h.host].week, state.uptime[h.host].month].map(function (v) { return fmtUp(v).replace("%", ""); }).join(" / ") + "%" : "—"],
+      ["active alerts", h.open_alerts || 0]
     ];
     el.innerHTML = '<span class="lamp ' + hostLevel(h) + '"></span><h1>' + esc(h.host) + '</h1><span class="os">' + esc(os) + '</span>' +
       '<div class="facts">' + facts.map(function (f) { return '<div class="fact"><div class="v">' + esc(f[1]) + '</div><div class="k">' + f[0] + '</div></div>'; }).join("") + '</div>';
@@ -893,12 +933,46 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     $("alertRows").innerHTML = list.length ? list.map(function (a) {
       var open = !a.resolved_at, color = open ? (a.level === "critical" ? COL.red : COL.amber) : COL.cyan;
       var fired = parseTs(a.fired_at), resolved = parseTs(a.resolved_at);
-      return '<tr><td><span class="tag" style="color:' + color + '">' + (open ? a.level : "resolved") + '</span></td>' +
+      return '<tr class="' + (open && a.acked_at ? "acked" : "") + '"><td class="keep"><span class="tag" style="color:' + color + '">' + (open ? (a.acked_at ? "acked" : a.level) : "resolved") + '</span></td>' +
         '<td><button class="hostlink" data-host="' + esc(a.host) + '">' + esc(a.host) + '</button></td>' +
         '<td>' + esc(metricInfo(a.name === "cpu_critical" ? "cpu" : a.name).label) + '</td><td class="n">' + fmtMetric(a.name, a.value) + '</td><td class="n">' + fmtMetric(a.name, a.threshold) + '</td>' +
         '<td>' + esc(a.fired_at) + '</td><td>' + (open ? '<span style="color:' + color + '">still open</span>' : esc(a.resolved_at) + (a.resolved_value != null ? ' at ' + fmtMetric(a.name, a.resolved_value) : "")) + '</td>' +
-        '<td class="n">' + (open ? fmtDuration(fired, new Date()) : fmtDuration(fired, resolved)) + '</td></tr>';
-    }).join("") : '<tr><td colspan="8" class="empty">No alerts match.</td></tr>';
+        '<td class="n">' + (open ? fmtDuration(fired, new Date()) : fmtDuration(fired, resolved)) + '</td>' +
+        '<td class="keep">' + alertActions(a) + '</td></tr>';
+    }).join("") : '<tr><td colspan="9" class="empty">No alerts match.</td></tr>';
+  }
+
+  function alertActions(a) {
+    if (a.source === "monitor" || String(a.id).charAt(0) !== "f") return '<span class="acts c-muted">—</span>';
+    var out = "";
+    if (isMuted(a)) {
+      var until = new Date(a.muted_until * 1000).toTimeString().slice(0, 5);
+      out += '<span class="muted-note">muted until ' + until + '</span><button class="btn" data-act="unmute" data-id="' + esc(a.id) + '">Unmute</button>';
+    } else if (!a.resolved_at) {
+      out += '<button class="btn" data-act="mute" data-id="' + esc(a.id) + '">Mute 1h</button>';
+    }
+    if (!a.resolved_at && !a.acked_at) out += '<button class="btn primary" data-act="ack" data-id="' + esc(a.id) + '">Acknowledge</button>';
+    return '<span class="acts">' + out + '</span>';
+  }
+
+  function alertMsg(text, ok) { var m = $("alertMsg"); m.textContent = text; m.className = "msg " + (ok ? "ok" : "err"); }
+
+  function alertAction(act, id) {
+    var labels = { ack: "Acknowledged.", mute: "Muted for 1 hour. Discord stays quiet for this node and rule.", unmute: "Unmuted. Discord messages are back on." };
+    if (state.demo) {
+      demoAlerts.forEach(function (a) {
+        var target = demoAlerts.filter(function (x) { return x.id === id; })[0];
+        if (act === "ack" && a.id === id) a.acked_at = new Date().toISOString().slice(0, 19).replace("T", " ");
+        if (act === "mute" && a.host === target.host && a.name === target.name) a.muted_until = Date.now() / 1000 + 3600;
+        if (act === "unmute" && a.host === target.host && a.name === target.name) a.muted_until = null;
+      });
+      alertMsg(labels[act] + " (demo only)", true); loadAlerts(); return;
+    }
+    var req = act === "ack" ? send("POST", "/alerts/" + id + "/ack")
+      : act === "mute" ? send("POST", "/alerts/" + id + "/mute", { minutes: 60 })
+      : send("DELETE", "/alerts/" + id + "/mute");
+    req.then(function () { alertMsg(labels[act], true); loadAlerts(); api("/hosts", demo.hosts).then(setHosts); })
+      .catch(function (e) { alertMsg(e.message, false); });
   }
 
   /* ---------------- render: rules page ---------------- */
@@ -921,6 +995,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
 
   function renderRules() {
     $("tokenRow").hidden = !state.rules.protected;
+    $("tokenRow2").hidden = !state.rules.protected;
     var rules = state.rules.rules.slice().sort(function (a, b) { return a.metric.localeCompare(b.metric) || a.threshold - b.threshold; });
     $("ruleRows").innerHTML = rules.length ? rules.map(ruleRow).join("") : '<tr><td colspan="7" class="empty">No rules, so nothing will alert. Add one below.</td></tr>';
   }
@@ -1020,6 +1095,36 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     });
   }
 
+  function loadUptime() {
+    apiSoft("/uptime", demo.uptime).then(function (list) {
+      state.uptime = {};
+      list.forEach(function (u) { state.uptime[u.host] = u; });
+      if (state.view === "overview") renderCards();
+      if (state.view === "node") renderNodeHead();
+    });
+  }
+
+  function updateCsvLink() {
+    var name = state.selected || "";
+    $("csv").href = "/export.csv?host=" + encodeURIComponent(name) + "&minutes=" + state.minutes;
+    $("csv").setAttribute("download", "linuxwatch-" + name.replace(/[^A-Za-z0-9._-]/g, "_") + "-" + state.minutes + "m.csv");
+  }
+
+  /* demo has no server, so build the file from the rows on screen */
+  function demoCsv(e) {
+    if (!state.demo) return;
+    e.preventDefault();
+    var cols = ["ts", "cpu", "ram", "disk", "swap", "load_1", "net_in", "net_out"];
+    var lines = [["time_utc"].concat(cols).join(",")].concat(state.rows.map(function (r) {
+      return [new Date(r.ts * 1000).toISOString().slice(0, 19).replace("T", " ")].concat(cols.map(function (c) { return r[c] == null ? "" : r[c]; })).join(",");
+    }));
+    var url = URL.createObjectURL(new Blob([lines.join("\n") + "\n"], { type: "text/csv" }));
+    var a = document.createElement("a");
+    a.href = url; a.download = $("csv").getAttribute("download");
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
   function loadSmart() {
     apiSoft("/anomalies/now", demo.anomNow).then(function (list) { state.anomNow = list; renderBanner(); });
     apiSoft("/forecast", demo.forecast).then(function (list) { state.forecast = list; renderForecast(); renderBanner(); if (state.view === "node") renderSystem(); });
@@ -1038,6 +1143,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
       if (data) state.rules = data;
       if (state.view === "rules") renderRules();
       if (state.view === "node") renderHistory();
+      $("tokenRow2").hidden = !state.rules.protected;
     });
   }
 
@@ -1062,6 +1168,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     if (r.view === "node") {
       if (state.selected !== r.host) { state.details = null; state.rows = []; state.anoms = []; state.nodeAlerts = []; }
       state.selected = r.host;
+      updateCsvLink();
       document.title = r.host + " · LinuxWatch";
       renderNode(); loadNode();
     } else {
@@ -1118,6 +1225,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     var b = e.target.closest(".range button"); if (!b) return;
     state.minutes = Number(b.dataset.min);
     renderRanges();
+    updateCsvLink();
     if (state.view === "node") loadNode();
     loadTraces();
   });
@@ -1138,6 +1246,10 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     renderAlerts();
   });
   $("alertHost").addEventListener("change", function (e) { state.alertHost = e.target.value; renderAlerts(); });
+  $("alertRows").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-act]"); if (b) alertAction(b.dataset.act, b.dataset.id);
+  });
+  $("csv").addEventListener("click", demoCsv);
 
   $("ruleRows").addEventListener("input", function (e) {
     var tr = e.target.closest("tr"); if (!tr) return;
@@ -1170,8 +1282,13 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     $("ruleRows").insertAdjacentHTML("beforeend", ruleRow({ id: null, metric: "cpu", threshold: 80, duration: 300, level: "warning", host: null, enabled: 1 }));
     $("ruleRows").querySelector('tr[data-id=""] [data-f="threshold"]').focus();
   });
-  $("token").addEventListener("input", function (e) { try { sessionStorage.setItem("lw-token", e.target.value); } catch (err) {} });
-  try { $("token").value = sessionStorage.getItem("lw-token") || ""; } catch (err) {}
+  function setToken(value) {
+    state.token = value;
+    document.querySelectorAll(".token-in").forEach(function (el) { if (el.value !== value) el.value = value; });
+    try { sessionStorage.setItem("lw-token", value); } catch (err) {}
+  }
+  document.querySelectorAll(".token-in").forEach(function (el) { el.addEventListener("input", function (e) { setToken(e.target.value); }); });
+  try { setToken(sessionStorage.getItem("lw-token") || ""); } catch (err) {}
 
   /* tooltips: hover on desktop, tap on touch */
   var tip = $("tip");
@@ -1219,8 +1336,9 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
   api("/hosts", demo.hosts).then(function (list) {
     setHosts(list);
     applyRoute();
-    loadAlerts(); loadRules(); loadTraces(); loadSmart();
+    loadAlerts(); loadRules(); loadTraces(); loadSmart(); loadUptime();
     setInterval(loadTraces, 60000);
+    setInterval(loadUptime, 60000);
     setInterval(loadSmart, 60000);
     setInterval(function () { if (state.view === "node") loadNode(); }, 30000);
     if (state.demo) {

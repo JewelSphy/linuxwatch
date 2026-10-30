@@ -27,6 +27,7 @@ A self-hosted Linux server monitoring system. Lightweight Python agents collect 
 - **Fleet alerts:** the server checks every agent's readings, so alerts work for every node, not only the server box
 - **Node offline alerts** when an agent stops reporting
 - **Editable rules** from the dashboard: metric, limit, wait time, level, and all nodes or one node (optional admin token)
+- **Acknowledge** an alert to take it off the problem banner, or **mute** a node + rule for an hour to stop Discord messages
 
 **Distributed architecture**
 - Agent / server split: one agent per machine, one central API
@@ -39,7 +40,9 @@ A self-hosted Linux server monitoring system. Lightweight Python agents collect 
 - Fleet overview: KPIs, a card per node with CPU / RAM / disk bars and a CPU sparkline, latest alerts
 - **Node detail page** (`#/node/<name>`): OS, kernel, uptime, memory and disk sizes, CPU gauge, CPU history, network, per-core CPU, top processes, services, load, temperature, connections, failed SSH logins, disk forecast and the node's own alerts
 - Problem banner that names the node and problem needing attention
-- Alert history with node and open / resolved filters
+- Alert history with node and open / resolved filters, acknowledge and mute buttons
+- **Uptime %** per node for the last 24 h, 7 d and 30 d
+- **CSV export** of a node's history for the selected time range
 - Alert rules editor
 - Time ranges: 15 min, 1 h, 6 h, 24 h, 7 d, 30 d
 - Keyboard shortcuts: `1` / `2` / `3` switch pages, `j` / `k` move between nodes, `/` filters, `Esc` goes back
@@ -170,6 +173,10 @@ On first start the server copies the `[thresholds]` and `[alerts] duration` valu
 | `GET` | `/metrics?host=&minutes=` | History for one host |
 | `GET` | `/hosts/{host}/details` | Latest snapshot: OS, cores, processes, services, temperature |
 | `GET` | `/alerts?limit=&host=` | Alert history, every node |
+| `POST` | `/alerts/{id}/ack` | Acknowledge a fleet alert |
+| `POST` / `DELETE` | `/alerts/{id}/mute` | Mute (body `{"minutes": 60}`) or unmute Discord for that node + rule |
+| `GET` | `/uptime` | Uptime % per host for 24 h, 7 d, 30 d |
+| `GET` | `/export.csv?host=&minutes=` | Download a host's history as CSV (hourly rollups past raw retention) |
 | `GET` | `/rules` | Alert rules |
 | `POST` / `PUT` / `DELETE` | `/rules`, `/rules/{id}` | Add, change, remove a rule (header `X-Admin-Token` when set) |
 | `GET` | `/history?host=&days=` | Hourly rollups for one host |
