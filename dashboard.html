@@ -245,6 +245,36 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
 .msg.ok{color:var(--cyan)}
 .explain{color:var(--muted);font-size:12px;max-width:75ch;margin:0}
 
+/* security + activity */
+.secstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--edge)}
+.secstats .kpi .v{font-size:24px}
+.split{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);border-top:1px solid var(--edge)}
+.split>div+div{border-left:1px solid var(--edge)}
+@media (max-width:700px){.split{grid-template-columns:minmax(0,1fr)}.split>div+div{border-left:0;border-top:1px solid var(--edge)}}
+.sub-h{padding:9px 12px 4px;color:var(--muted);font-size:11px}
+.iplist .row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:6px 12px;border-bottom:1px solid var(--edge);font-size:12px}
+.iplist .row:last-child{border-bottom:0}
+.iplist .ip{overflow-wrap:anywhere}
+.iplist .n{text-align:right;color:var(--magenta)}
+.iplist .who{grid-column:1/-1;color:var(--dim);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ports{padding:4px 12px 10px}
+.ports .h{display:flex;align-items:baseline;gap:8px;margin-top:8px;font-size:12px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.chip{font-size:11px;padding:1px 6px;border:1px solid var(--edge);color:var(--muted)}
+.chip.pub{border-color:var(--amber);color:var(--amber)}
+.feed{max-height:520px;overflow-y:auto}
+.ev{display:grid;grid-template-columns:52px 10px minmax(0,1fr);gap:4px 10px;align-items:baseline;padding:8px 12px;border-bottom:1px solid var(--edge);font-size:12px}
+.ev:last-child{border-bottom:0}
+.ev .t{color:var(--dim);font-size:11px}
+.ev .d{width:8px;height:8px;align-self:center}
+.ev .x{overflow-wrap:anywhere}
+.ev .k{color:var(--dim);font-size:11px}
+.noisy .row{display:grid;grid-template-columns:minmax(0,1fr) 90px 34px;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--edge);font-size:12px}
+.noisy .row:last-child{border-bottom:0}
+.noisy .t{height:6px;background:#16205a;position:relative}
+.noisy .t i{position:absolute;inset:0 auto 0 0}
+.noisy .n{text-align:right}
+
 /* problem banner */
 .banner{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding:9px 14px;border:1px solid var(--red);background:linear-gradient(90deg,rgba(251,113,133,.14),rgba(251,113,133,.03))}
 .banner.warn{border-color:var(--amber);background:linear-gradient(90deg,rgba(251,191,36,.12),rgba(251,191,36,.02))}
@@ -301,6 +331,29 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
         <div class="panel">
           <div class="ph"><h2>Latest alerts</h2><a class="m" href="#/alerts">see all</a></div>
           <div class="mini-list" id="recent"></div>
+        </div>
+      </div>
+      <div class="grid g2e">
+        <div class="panel">
+          <div class="ph"><h2>SSH security</h2><span class="m">last 24 h, every node</span></div>
+          <div class="secstats">
+            <div class="kpi"><div class="v" id="sTotal">0</div><div class="k">failed logins</div></div>
+            <div class="kpi"><div class="v" id="sIps">0</div><div class="k">attacking IPs</div></div>
+            <div class="kpi"><div class="v" id="sHosts">0</div><div class="k">nodes targeted</div></div>
+          </div>
+          <div class="chart pb" id="secChart"></div>
+          <div class="split">
+            <div><div class="sub-h">Top attacking IPs</div><div class="iplist" id="secIps"></div></div>
+            <div>
+              <div class="sub-h">Usernames tried</div><div class="ports"><div class="chips" id="secUsers"></div></div>
+              <div class="sub-h">Listening ports <span class="chip pub">public</span> <span class="chip">local only</span></div>
+              <div class="ports" id="secPorts"></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Activity</h2><span class="m">newest first</span></div>
+          <div class="feed" id="feed"></div>
         </div>
       </div>
     </section>
@@ -365,6 +418,24 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
         <label for="token2" class="c-muted">Admin token</label>
         <input class="field token-in" id="token2" type="password" autocomplete="off" placeholder="from config.ini [dashboard]">
       </div>
+      <div class="panel kpis">
+        <div class="kpi"><div class="v" id="aOpen">0</div><div class="k">open</div></div>
+        <div class="kpi"><div class="v" id="aAcked">0</div><div class="k">acknowledged</div></div>
+        <div class="kpi"><div class="v" id="aMuted">0</div><div class="k">muted</div></div>
+        <div class="kpi"><div class="v" id="aDay">0</div><div class="k">fired in 24 h</div></div>
+        <div class="kpi"><div class="v" id="aWeek">0</div><div class="k">fired in 7 days</div></div>
+        <div class="kpi"><div class="v" id="aFix">—</div><div class="k">average time to resolve</div></div>
+      </div>
+      <div class="grid g2">
+        <div class="panel">
+          <div class="ph"><h2>Alerts per day</h2><div class="legend"><span class="m" style="color:var(--red)">■ critical</span> <span class="m" style="color:var(--amber)">■ warning</span></div></div>
+          <div class="chart pb" id="perDay"></div>
+        </div>
+        <div class="panel">
+          <div class="ph"><h2>Noisiest</h2><span class="m">alerts by node and metric</span></div>
+          <div class="noisy" id="noisy"></div>
+        </div>
+      </div>
       <div class="panel">
         <div class="ph">
           <div class="filters">
@@ -384,6 +455,10 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
         </table></div>
       </div>
       <span class="msg" id="alertMsg" role="status"></span>
+      <div class="panel">
+        <div class="ph"><h2>Alert activity</h2><span class="m">fired, resolved, acknowledged, muted, rule changes</span></div>
+        <div class="feed" id="feed2" style="max-height:360px"></div>
+      </div>
     </section>
 
     <!-- rules -->
@@ -423,7 +498,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     demo: false, hosts: [], alerts: [], rules: { metrics: METRIC_FALLBACK, rules: [], protected: false },
     view: "overview", selected: null, minutes: 60, filter: "", alertFilter: "all", alertHost: "",
     traces: {}, rows: [], net: { in: true, out: true }, anoms: [], anomNow: [], forecast: [], details: null, nodeAlerts: [],
-    uptime: {}, token: ""
+    uptime: {}, token: "", security: null, events: []
   };
 
   /* ---------------- helpers ---------------- */
@@ -537,15 +612,57 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
         { host: "worker-01", day: 82.5, week: 96.4, month: 98.1 }
       ];
     },
+    security: function () {
+      var now = Date.now() / 1000, hourly = [];
+      for (var i = 24; i >= 0; i--) hourly.push({ hour: Math.floor((now - i * 3600) / 3600) * 3600, count: Math.round(8 + Math.abs(Math.sin(i / 3)) * 30 + (i === 6 ? 140 : 0) + (i === 7 ? 60 : 0)) });
+      return {
+        hours: 24, total: hourly.reduce(function (s, h) { return s + h.count; }, 0), unique_ips: 37, hosts_targeted: 2, hourly: hourly,
+        by_host: { "web-01": 612, "db-01": 241 },
+        top_ips: [
+          { ip: "218.92.0.112", count: 318, hosts: 2, last_seen: now - 240, users: "root,admin" },
+          { ip: "45.155.205.233", count: 142, hosts: 1, last_seen: now - 1300, users: "ubuntu,test,oracle" },
+          { ip: "61.177.172.13", count: 97, hosts: 2, last_seen: now - 5200, users: "root" },
+          { ip: "193.32.162.40", count: 61, hosts: 1, last_seen: now - 9100, users: "postgres,git,admin" },
+          { ip: "103.149.28.8", count: 33, hosts: 1, last_seen: now - 15000, users: "pi,user" }
+        ],
+        top_users: [{ user: "root", count: 402 }, { user: "admin", count: 121 }, { user: "ubuntu", count: 88 }, { user: "test", count: 54 }, { user: "oracle", count: 31 }, { user: "postgres", count: 22 }],
+        ports: [
+          { host: "db-01", ports: [{ port: 22, public: true }, { port: 5432, public: false }, { port: 9100, public: false }] },
+          { host: "linux-monitor", ports: [{ port: 22, public: true }, { port: 8000, public: true }] },
+          { host: "web-01", ports: [{ port: 22, public: true }, { port: 80, public: true }, { port: 443, public: true }, { port: 6379, public: false }] },
+          { host: "worker-01", ports: null }
+        ]
+      };
+    },
+    events: function () {
+      var now = Date.now() / 1000;
+      return [
+        { ts: now - 120, kind: "ssh", level: "warning", host: "web-01", text: "23 failed SSH logins from 218.92.0.112 in 60 s" },
+        { ts: now - 420, kind: "offline", level: "critical", host: "worker-01", text: "went offline, nothing heard for 3m" },
+        { ts: now - 900, kind: "alert", level: "warning", host: "web-01", text: "CPU 86.2%, limit 80.0%" },
+        { ts: now - 1500, kind: "mute", level: "info", host: "db-01", text: "muted Disk alerts for 60 min" },
+        { ts: now - 2400, kind: "resolved", level: "ok", host: "db-01", text: "Disk back to 87.5%" },
+        { ts: now - 3600, kind: "ack", level: "info", host: "db-01", text: "acknowledged Disk alert" },
+        { ts: now - 5000, kind: "alert", level: "warning", host: "db-01", text: "Disk 91.0%, limit 90.0%" },
+        { ts: now - 7200, kind: "rule", level: "info", host: null, text: "changed rule: CPU at or above 80.0% for 5 min, warning" },
+        { ts: now - 9000, kind: "online", level: "ok", host: "worker-01", text: "back online" },
+        { ts: now - 86000, kind: "joined", level: "ok", host: "db-01", text: "started reporting" }
+      ];
+    },
     alerts: function () { return demoAlerts; },
     alertsSeed: function () {
-      return [
-        { id: "f6", host: "worker-01", name: "offline", level: "critical", value: 240, threshold: 180, unit: "s", fired_at: "2026-10-14 06:20:03", resolved_at: null, resolved_value: null },
-        { id: "f5", host: "web-01", name: "cpu", level: "warning", value: 86.2, threshold: 80, unit: "%", fired_at: "2026-10-14 06:12:03", resolved_at: null, resolved_value: null },
-        { id: "f4", host: "db-01", name: "disk", level: "warning", value: 91.0, threshold: 90, unit: "%", fired_at: "2026-10-14 03:40:11", resolved_at: "2026-10-14 04:02:55", resolved_value: 87.5 },
-        { id: "f3", host: "web-01", name: "ram", level: "warning", value: 88.4, threshold: 85, unit: "%", fired_at: "2026-10-13 22:15:40", resolved_at: "2026-10-13 22:31:02", resolved_value: 71.4 },
-        { id: "f2", host: "web-01", name: "cpu", level: "critical", value: 97.1, threshold: 95, unit: "%", fired_at: "2026-10-13 19:02:18", resolved_at: "2026-10-13 19:09:44", resolved_value: 42.0 }
+      // spread over the last two weeks so the per-day chart has something to show
+      var ago = function (min) { return new Date(Date.now() - min * 60000).toISOString().slice(0, 19).replace("T", " "); };
+      var list = [
+        { id: "f6", host: "worker-01", name: "offline", level: "critical", value: 240, threshold: 180, unit: "s", fired_at: ago(7), resolved_at: null, resolved_value: null },
+        { id: "f5", host: "web-01", name: "cpu", level: "warning", value: 86.2, threshold: 80, unit: "%", fired_at: ago(15), resolved_at: null, resolved_value: null }
       ];
+      var specs = [["db-01", "disk", "warning", 91, 90, 87.5], ["web-01", "ram", "warning", 88.4, 85, 71.4], ["web-01", "cpu", "critical", 97.1, 95, 42], ["web-01", "cpu", "warning", 84, 80, 60], ["worker-01", "offline", "critical", 400, 180, 0]];
+      for (var i = 0; i < 22; i++) {
+        var sp = specs[(i * 7) % specs.length], at = 80 + i * 870 + (i % 3) * 140;
+        list.push({ id: "f" + (100 - i), host: sp[0], name: sp[1], level: sp[2], value: sp[3], threshold: sp[4], unit: sp[1] === "offline" ? "s" : "%", fired_at: ago(at), resolved_at: ago(at - 12 - (i % 5) * 9), resolved_value: sp[5] });
+      }
+      return list;
     },
     rules: function () { return { metrics: METRIC_FALLBACK, protected: false, rules: demoRules }; }
   };
@@ -821,6 +938,113 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     $("recent").innerHTML = list.length ? list.map(function (a) { return alertLine(a, true); }).join("") : '<div class="empty">No alerts yet. That is good news.</div>';
   }
 
+  /* ---------------- render: security + activity ---------------- */
+  function hourBars(list, color) {
+    var W = 560, H = 120, L = 34, R = 6, T = 8, B = 18;
+    if (!list.length) return '<div class="empty">No data yet.</div>';
+    var max = Math.max(1, Math.max.apply(null, list.map(function (h) { return h.count; })));
+    var bw = (W - L - R) / list.length, out = "";
+    var Y = function (v) { return T + (1 - v / max) * (H - T - B); };
+    out += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(0) + '" y2="' + Y(0) + '" stroke="' + COL.grid + '"/>' +
+      '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(max) + '" y2="' + Y(max) + '" stroke="' + COL.grid + '"/>' +
+      '<text class="axis" x="' + (L - 6) + '" y="' + (Y(max) + 3) + '" text-anchor="end">' + max + '</text><text class="axis" x="' + (L - 6) + '" y="' + (Y(0) + 3) + '" text-anchor="end">0</text>';
+    list.forEach(function (h, i) {
+      var x = L + i * bw + 1, y = Y(h.count), d = new Date(h.hour * 1000);
+      out += '<g class="b"><rect class="bar" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(1, bw - 2).toFixed(1) + '" height="' + (Y(0) - y).toFixed(1) + '" fill="' + color + '" opacity=".85"/>' +
+        '<rect class="hit" x="' + (L + i * bw).toFixed(1) + '" y="' + T + '" width="' + bw.toFixed(1) + '" height="' + (H - T - B) + '" data-tip="' + d.toTimeString().slice(0, 5) + '  ' + h.count + ' failed logins"/></g>';
+    });
+    out += '<text class="axis" x="' + L + '" y="' + (H - 4) + '">-24 h</text><text class="axis" x="' + (W - R) + '" y="' + (H - 4) + '" text-anchor="end">now</text>';
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Failed SSH logins per hour">' + GLOW + out + '</svg>';
+  }
+
+  function renderSecurity() {
+    var s = state.security;
+    if (!s) return;
+    $("sTotal").textContent = s.total; $("sTotal").className = "v " + (s.total ? "c-mag" : "c-muted");
+    $("sIps").textContent = s.unique_ips; $("sIps").className = "v " + (s.unique_ips ? "c-amber" : "c-muted");
+    $("sHosts").textContent = s.hosts_targeted; $("sHosts").className = "v " + (s.hosts_targeted ? "c-red" : "c-muted");
+    $("secChart").innerHTML = s.total ? hourBars(s.hourly, COL.magenta)
+      : '<div class="note">No failed SSH logins in the last 24 h. On Linux the agent needs to read /var/log/auth.log (adm group) to count them.</div>';
+    $("secIps").innerHTML = s.top_ips.length ? s.top_ips.map(function (r) {
+      return '<div class="row"><span class="ip">' + esc(r.ip) + '</span><span class="n">' + r.count + '</span>' +
+        '<span class="who">' + r.hosts + (r.hosts === 1 ? " node" : " nodes") + ', last ' + fmtAgo(Date.now() / 1000 - r.last_seen) + ' ago' + (r.users ? ', tried ' + esc(r.users.split(",").slice(0, 4).join(", ")) : "") + '</span></div>';
+    }).join("") : '<div class="note">Nobody tried to break in.</div>';
+    $("secUsers").innerHTML = s.top_users.length ? s.top_users.map(function (u) { return '<span class="chip">' + esc(u.user) + ' ' + u.count + '</span>'; }).join("") : '<span class="c-muted">none</span>';
+    $("secPorts").innerHTML = s.ports.length ? s.ports.map(function (h) {
+      var chips = h.ports == null ? '<span class="c-muted" style="font-size:11px">not readable on this OS without root</span>'
+        : (h.ports.length ? h.ports.map(function (p) { return '<span class="chip' + (p.public ? " pub" : "") + '">' + p.port + '</span>'; }).join("") : '<span class="c-muted">none</span>');
+      return '<div class="h"><button class="hostlink" data-host="' + esc(h.host) + '">' + esc(h.host) + '</button></div><div class="chips">' + chips + '</div>';
+    }).join("") : '<div class="note">Ports appear once nodes run the new agent.py.</div>';
+  }
+
+  var EVENT_LABEL = { joined: "joined", offline: "offline", online: "online", alert: "alert", resolved: "resolved", rule: "rule", ack: "acknowledged", mute: "mute", ssh: "ssh" };
+  function eventColor(e) { return { critical: COL.red, warning: COL.amber, ok: COL.cyan }[e.level] || COL.violet; }
+  function fmtWhen(ts) {
+    var d = new Date(ts * 1000), today = new Date();
+    return d.toDateString() === today.toDateString() ? d.toTimeString().slice(0, 5) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  function feedHtml(list) {
+    return list.length ? list.map(function (e) {
+      return '<div class="ev"><span class="t">' + fmtWhen(e.ts) + '</span><span class="d" style="background:' + eventColor(e) + ';box-shadow:0 0 8px ' + eventColor(e) + '"></span>' +
+        '<span class="x">' + (e.host ? '<button class="hostlink" data-host="' + esc(e.host) + '">' + esc(e.host) + '</button> ' : "") + esc(e.text) + ' <span class="k">' + (EVENT_LABEL[e.kind] || e.kind) + '</span></span></div>';
+    }).join("") : '<div class="empty">Nothing has happened yet. Events show up here as nodes report, alerts fire and rules change.</div>';
+  }
+
+  function renderFeed() {
+    $("feed").innerHTML = feedHtml(state.events.slice(0, 40));
+    $("feed2").innerHTML = feedHtml(state.events.filter(function (e) { return e.kind !== "joined" && e.kind !== "ssh"; }).slice(0, 40));
+  }
+
+  function renderAlertStats() {
+    var now = Date.now(), list = state.alerts;
+    var open = list.filter(function (a) { return !a.resolved_at; });
+    var fired = function (ms) { return list.filter(function (a) { var t = parseTs(a.fired_at); return t && now - t < ms; }).length; };
+    var done = list.filter(function (a) { return a.resolved_at; }).map(function (a) { return parseTs(a.resolved_at) - parseTs(a.fired_at); });
+    var avg = done.length ? done.reduce(function (s, x) { return s + x; }, 0) / done.length : null;
+    var set = function (id, v, cls) { $(id).textContent = v; $(id).className = "v " + cls; };
+    set("aOpen", open.length, open.length ? "c-red" : "c-muted");
+    set("aAcked", open.filter(function (a) { return a.acked_at; }).length, "c-amber");
+    set("aMuted", list.filter(isMuted).length, "c-mag");
+    set("aDay", fired(86400000), "c-cyan");
+    set("aWeek", fired(7 * 86400000), "c-cyan");
+    set("aFix", avg == null ? "—" : fmtDuration(new Date(0), new Date(avg)), "c-cyan");
+
+    // alerts per day, last 14 days, stacked by level
+    var W = 560, H = 150, L = 26, R = 6, T = 8, B = 18, days = [], i;
+    var start = new Date(); start.setHours(0, 0, 0, 0);
+    for (i = 13; i >= 0; i--) days.push({ t: start.getTime() - i * 86400000, crit: 0, warn: 0 });
+    list.forEach(function (a) {
+      var t = parseTs(a.fired_at); if (!t) return;
+      var d = new Date(t); d.setHours(0, 0, 0, 0);
+      var slot = days.filter(function (x) { return x.t === d.getTime(); })[0];
+      if (slot) slot[a.level === "critical" ? "crit" : "warn"]++;
+    });
+    var max = Math.max(1, Math.max.apply(null, days.map(function (d) { return d.crit + d.warn; })));
+    var bw = (W - L - R) / days.length, Y = function (v) { return T + (1 - v / max) * (H - T - B); }, out = "";
+    out += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(0) + '" y2="' + Y(0) + '" stroke="' + COL.grid + '"/><text class="axis" x="' + (L - 6) + '" y="' + (Y(max) + 3) + '" text-anchor="end">' + max + '</text>';
+    days.forEach(function (d, j) {
+      var x = L + j * bw + 2, w = Math.max(1, bw - 4), yw = Y(d.warn), yc = Y(d.warn + d.crit);
+      var label = new Date(d.t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      out += '<g class="b"><rect x="' + x.toFixed(1) + '" y="' + yw.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (Y(0) - yw).toFixed(1) + '" fill="' + COL.amber + '" opacity=".85"/>' +
+        '<rect x="' + x.toFixed(1) + '" y="' + yc.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + (yw - yc).toFixed(1) + '" fill="' + COL.red + '" opacity=".9"/>' +
+        '<rect class="hit" x="' + (L + j * bw).toFixed(1) + '" y="' + T + '" width="' + bw.toFixed(1) + '" height="' + (H - T - B) + '" data-tip="' + label + '\n' + d.crit + ' critical, ' + d.warn + ' warning"/></g>';
+      if (j % 3 === 1 || j === days.length - 1) out += '<text class="axis" x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle">' + (j === days.length - 1 ? "today" : label) + '</text>';
+    });
+    $("perDay").innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Alerts per day, last 14 days">' + out + '</svg>';
+
+    // noisiest node + metric pairs
+    var counts = {};
+    list.forEach(function (a) { var k = a.host + "\u0000" + a.name; counts[k] = (counts[k] || 0) + 1; });
+    var top = Object.keys(counts).map(function (k) { var p = k.split("\u0000"); return { host: p[0], name: p[1], n: counts[k] }; })
+      .sort(function (a, b) { return b.n - a.n; }).slice(0, 7);
+    var topMax = top.length ? top[0].n : 1;
+    $("noisy").innerHTML = top.length ? top.map(function (r) {
+      return '<div class="row"><span><button class="hostlink" data-host="' + esc(r.host) + '">' + esc(r.host) + '</button> ' + esc(metricInfo(r.name === "cpu_critical" ? "cpu" : r.name).label) + '</span>' +
+        '<span class="t">' + bar(r.n / topMax * 100, COL.magenta) + '</span><span class="n">' + r.n + '</span></div>';
+    }).join("") : '<div class="empty">No alerts yet.</div>';
+  }
+
   /* ---------------- render: node page ---------------- */
   function renderNodeHead() {
     var h = selectedHost(), d = state.details, el = $("nodeHead");
@@ -930,6 +1154,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
       return state.alertFilter === "open" ? !a.resolved_at : (state.alertFilter === "resolved" ? !!a.resolved_at : true);
     });
     $("alertCount").textContent = list.length + (list.length === 1 ? " alert" : " alerts");
+    renderAlertStats();
     $("alertRows").innerHTML = list.length ? list.map(function (a) {
       var open = !a.resolved_at, color = open ? (a.level === "critical" ? COL.red : COL.amber) : COL.cyan;
       var fired = parseTs(a.fired_at), resolved = parseTs(a.resolved_at);
@@ -971,7 +1196,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     var req = act === "ack" ? send("POST", "/alerts/" + id + "/ack")
       : act === "mute" ? send("POST", "/alerts/" + id + "/mute", { minutes: 60 })
       : send("DELETE", "/alerts/" + id + "/mute");
-    req.then(function () { alertMsg(labels[act], true); loadAlerts(); api("/hosts", demo.hosts).then(setHosts); })
+    req.then(function () { alertMsg(labels[act], true); loadAlerts(); loadEvents(); api("/hosts", demo.hosts).then(setHosts); })
       .catch(function (e) { alertMsg(e.message, false); });
   }
 
@@ -1024,7 +1249,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
       ruleMsg("Saved (demo only, nothing sent to a server).", true); loadRules(); return;
     }
     send(id ? "PUT" : "POST", id ? "/rules/" + id : "/rules", rule)
-      .then(function () { ruleMsg("Rule saved. It applies from the next reading.", true); loadRules(); loadAlerts(); })
+      .then(function () { ruleMsg("Rule saved. It applies from the next reading.", true); loadRules(); loadAlerts(); loadEvents(); })
       .catch(function (e) { ruleMsg(e.message, false); });
   }
 
@@ -1093,6 +1318,14 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
       api("/metrics?host=" + encodeURIComponent(h.host) + "&minutes=" + m, function () { return demo.metrics(h.host, m); })
         .then(function (rows) { state.traces[h.host] = rows; if (state.view === "overview") { renderTraces(); renderCards(); } });
     });
+  }
+
+  function loadSecurity() {
+    apiSoft("/security", demo.security, null).then(function (s) { if (s) { state.security = s; renderSecurity(); } });
+  }
+
+  function loadEvents() {
+    apiSoft("/events?limit=80", demo.events).then(function (list) { state.events = list; renderFeed(); });
   }
 
   function loadUptime() {
@@ -1220,6 +1453,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
   $("banner").addEventListener("click", hostClick(".item"));
   $("recent").addEventListener("click", hostClick(".hostlink"));
   $("alertRows").addEventListener("click", hostClick(".hostlink"));
+  ["feed", "feed2", "secPorts", "noisy"].forEach(function (id) { $(id).addEventListener("click", hostClick(".hostlink")); });
 
   document.addEventListener("click", function (e) {
     var b = e.target.closest(".range button"); if (!b) return;
@@ -1336,9 +1570,10 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
   api("/hosts", demo.hosts).then(function (list) {
     setHosts(list);
     applyRoute();
-    loadAlerts(); loadRules(); loadTraces(); loadSmart(); loadUptime();
+    loadAlerts(); loadRules(); loadTraces(); loadSmart(); loadUptime(); loadSecurity(); loadEvents();
     setInterval(loadTraces, 60000);
     setInterval(loadUptime, 60000);
+    setInterval(loadSecurity, 60000);
     setInterval(loadSmart, 60000);
     setInterval(function () { if (state.view === "node") loadNode(); }, 30000);
     if (state.demo) {
@@ -1346,6 +1581,7 @@ select:hover,.field:hover{border-color:var(--edge-hi)}
     } else {
       connectWS();
       setInterval(loadAlerts, 15000);
+      setInterval(loadEvents, 15000);
     }
   });
 })();

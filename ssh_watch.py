@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import getpass
 import subprocess
@@ -43,12 +44,30 @@ def is_failed_login(line):
    return "sshd" in line and ("Failed password" in line or "Invalid user" in line)
 
 
+# "Failed password for [invalid user] NAME from IP" or "Invalid user NAME from IP"
+FAILED_RE = re.compile(r"(?:Failed password for (?:invalid user )?(\S*)|Invalid user (\S*)) from ([0-9A-Fa-f:.]+)")
+
+
+def parse_failure(line):
+   """Return (user, ip) for a failed SSH login line."""
+   match = FAILED_RE.search(line)
+   if not match:
+      return None, "unknown"
+   return match.group(1) or match.group(2) or None, match.group(3)
+
+
 # (path, inode, byte offset) of the last read, so each call only reads new lines
 position = None
 
 
 def get_ssh_failed_interval():
-   """Failed SSH logins since the previous call, reading only the bytes appended since then."""
+   """Failed SSH logins since the previous call (monitor.py); None when the log can't be read."""
+   failures = get_ssh_failures_interval()
+   return None if failures is None else len(failures)
+
+
+def get_ssh_failures_interval():
+   """(user, ip) for each failed SSH login since the previous call, reading only the bytes appended since then."""
    global position
    path = find_auth_log()
    if path is None:
@@ -57,7 +76,7 @@ def get_ssh_failed_interval():
       stat = os.stat(path)
       if position is None:
          position = (path, stat.st_ino, stat.st_size)
-         return 0
+         return []
       last_path, last_inode, offset = position
       if last_path != path or last_inode != stat.st_ino or stat.st_size < offset:
          offset = 0   # rotated or truncated: count the new file from its start
@@ -68,6 +87,6 @@ def get_ssh_failed_interval():
       return None
 
    end = chunk.rfind(b"\n") + 1   # leave a half-written last line for the next call
-   count = sum(1 for line in chunk[:end].decode(errors="ignore").splitlines() if is_failed_login(line))
+   lines = chunk[:end].decode(errors="ignore").splitlines()
    position = (path, stat.st_ino, offset + end)
-   return count
+   return [parse_failure(line) for line in lines if is_failed_login(line)]

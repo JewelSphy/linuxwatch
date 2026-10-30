@@ -61,6 +61,9 @@ def delete_old():
       hourly_deleted = conn.execute(
          "DELETE FROM host_metrics_hourly WHERE hour < ?", (now - HOURLY_DAYS * 86400,)
       ).rowcount
+      # activity and SSH history follow the same retention as the hourly data
+      conn.execute("DELETE FROM events WHERE ts < ?", (now - HOURLY_DAYS * 86400,))
+      conn.execute("DELETE FROM ssh_failures WHERE ts < ?", (now - HOURLY_DAYS * 86400,))
    return raw_deleted, hourly_deleted
 
 

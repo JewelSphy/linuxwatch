@@ -3,8 +3,9 @@ import time
 import socket
 import platform
 import psutil
+from collections import Counter
 from config import SERVICES
-from ssh_watch import get_ssh_failed_interval
+from ssh_watch import get_ssh_failures_interval
 
 
 TOP_PROCESSES = 8
@@ -65,6 +66,40 @@ def open_connections():
          return None   # macOS needs root for this
 
 
+def listening_ports():
+   """TCP ports with something listening; public = reachable from other machines (not 127.0.0.1 / ::1)."""
+   ports = {}
+   try:
+      for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+         with open(path) as f:
+            next(f, None)
+            for line in f:
+               fields = line.split()
+               if len(fields) > 3 and fields[3] == "0A":   # 0A = LISTEN
+                  addr, port_hex = fields[1].rsplit(":", 1)
+                  local = addr in ("0100007F", "00000000000000000000000001000000")
+                  port = int(port_hex, 16)
+                  ports[port] = ports.get(port, False) or not local
+   except OSError:
+      try:
+         for c in psutil.net_connections(kind="tcp"):
+            if c.status == psutil.CONN_LISTEN and c.laddr:
+               local = c.laddr.ip in ("127.0.0.1", "::1")
+               ports[c.laddr.port] = ports.get(c.laddr.port, False) or not local
+      except (psutil.AccessDenied, OSError):
+         return None   # macOS needs root for this
+   return [{"port": p, "public": pub} for p, pub in sorted(ports.items())]
+
+
+def ssh_attempts():
+   """Failed SSH logins this interval grouped by (ip, user); None when the auth log can't be read."""
+   failures = get_ssh_failures_interval()
+   if failures is None:
+      return None
+   counts = Counter((ip, user) for user, ip in failures)
+   return [{"ip": ip, "user": user, "count": n} for (ip, user), n in counts.most_common(50)]
+
+
 def start_process_sample():
    procs = []
    for p in psutil.process_iter(["pid", "name", "username"]):
@@ -117,6 +152,7 @@ def sample(seconds=1):
    vm = psutil.virtual_memory()
    du = psutil.disk_usage("/")
 
+   attempts = ssh_attempts()
    details = system_info()
    details.update({
       "uptime": time.time() - details["boot_time"],
@@ -126,8 +162,10 @@ def sample(seconds=1):
       "disk_used": du.used,
       "temp": cpu_temp(),
       "connections": open_connections(),
-      "ssh_failed": get_ssh_failed_interval(),
+      "ports": listening_ports(),
       "services": [{"name": s, "running": s in names} for s in SERVICES],
       "processes": top,
+      "ssh_failed": None if attempts is None else sum(a["count"] for a in attempts),
+      "ssh_attempts": attempts,
    })
    return cpu, details

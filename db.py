@@ -63,6 +63,23 @@ SERVER_SCHEMA = """
        resolved_value REAL
    );
    CREATE INDEX IF NOT EXISTS idx_fleet_open ON fleet_alerts (host, rule_id, resolved_at);
+   CREATE TABLE IF NOT EXISTS events (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       ts REAL NOT NULL,
+       kind TEXT NOT NULL,
+       level TEXT NOT NULL DEFAULT 'info',
+       host TEXT,
+       text TEXT NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS idx_events_ts ON events (ts);
+   CREATE TABLE IF NOT EXISTS ssh_failures (
+       host TEXT NOT NULL,
+       ts REAL NOT NULL,
+       ip TEXT NOT NULL,
+       user TEXT,
+       count INTEGER NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS idx_ssh_ts ON ssh_failures (ts);
    CREATE TABLE IF NOT EXISTS alert_mutes (
        host TEXT NOT NULL,
        rule_id INTEGER NOT NULL,

@@ -43,6 +43,9 @@ A self-hosted Linux server monitoring system. Lightweight Python agents collect 
 - Alert history with node and open / resolved filters, acknowledge and mute buttons
 - **Uptime %** per node for the last 24 h, 7 d and 30 d
 - **CSV export** of a node's history for the selected time range
+- **SSH security panel:** failed logins per hour, top attacking IPs and the usernames they tried, nodes targeted, and every node's listening ports (public vs local only)
+- **Activity log:** nodes joining, going offline and coming back, alerts firing and resolving, acks, mutes, rule changes, and SSH brute-force bursts
+- **Alerts page stats:** open / acknowledged / muted, fired in 24 h and 7 d, average time to resolve, alerts per day for 14 days, noisiest node + metric
 - Alert rules editor
 - Time ranges: 15 min, 1 h, 6 h, 24 h, 7 d, 30 d
 - Keyboard shortcuts: `1` / `2` / `3` switch pages, `j` / `k` move between nodes, `/` filters, `Esc` goes back
@@ -77,6 +80,8 @@ flowchart LR
 | SSH watcher | `ssh_watch.py` | Counts failed SSH logins from `/var/log/auth.log` or `/var/log/secure` |
 | Agent | `agent.py` | Sends readings to the central server, buffers when offline |
 | Node details | `details.py` | Agent-side snapshot: OS, per-core CPU, top processes, services, temperature, SSH fails |
+| Security | `security.py` | Stores failed SSH logins by IP and user, `/security` summary |
+| Activity log | `activity.py` | `events` table and `/events` |
 | Fleet alerts | `fleet_alerts.py` | Server-side rules for every node, offline detection, `/rules` API |
 | Server | `server.py` | FastAPI: receives metrics, serves the API, WebSocket and dashboard |
 | Dashboard | `dashboard.html` | Single-page live dashboard, no build step |
@@ -176,6 +181,8 @@ On first start the server copies the `[thresholds]` and `[alerts] duration` valu
 | `POST` | `/alerts/{id}/ack` | Acknowledge a fleet alert |
 | `POST` / `DELETE` | `/alerts/{id}/mute` | Mute (body `{"minutes": 60}`) or unmute Discord for that node + rule |
 | `GET` | `/uptime` | Uptime % per host for 24 h, 7 d, 30 d |
+| `GET` | `/security?hours=` | Failed SSH logins per hour, top IPs and usernames, listening ports |
+| `GET` | `/events?limit=&host=` | Activity log, newest first |
 | `GET` | `/export.csv?host=&minutes=` | Download a host's history as CSV (hourly rollups past raw retention) |
 | `GET` | `/rules` | Alert rules |
 | `POST` / `PUT` / `DELETE` | `/rules`, `/rules/{id}` | Add, change, remove a rule (header `X-Admin-Token` when set) |

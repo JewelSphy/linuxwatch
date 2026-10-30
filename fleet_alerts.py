@@ -10,6 +10,7 @@ from config import (SERVER_DB_PATH, INTERVAL, ADMIN_TOKEN, ALERT_DURATION,
                     CPU_WARNING, CPU_CRITICAL, RAM_WARNING, DISK_WARNING)
 from db import connect
 from alerts import send_discord
+from activity import log_event
 
 
 log = logging.getLogger("linuxwatch")
@@ -124,6 +125,10 @@ def fire(conn, host, rule, value, ts):
    label = METRICS[rule["metric"]][0]
    text = f"{rule['level'].upper()}: {host} {label} is {fmt_value(rule['metric'], value)} (limit {fmt_value(rule['metric'], rule['threshold'])})"
    tell(conn, host, rule, text)
+   if rule["metric"] == "offline":
+      log_event(conn, "offline", f"went offline, nothing heard for {fmt_value('offline', value)}", host, rule["level"], ts)
+   else:
+      log_event(conn, "alert", f"{label} {fmt_value(rule['metric'], value)}, limit {fmt_value(rule['metric'], rule['threshold'])}", host, rule["level"], ts)
 
 
 def resolve(conn, alert_id, host, rule, value, ts):
@@ -131,6 +136,10 @@ def resolve(conn, alert_id, host, rule, value, ts):
    label = METRICS[rule["metric"]][0]
    text = f"RESOLVED: {host} {label} back to {fmt_value(rule['metric'], value)}"
    tell(conn, host, rule, text, info=True)
+   if rule["metric"] == "offline":
+      log_event(conn, "online", "back online", host, "ok", ts)
+   else:
+      log_event(conn, "resolved", f"{label} back to {fmt_value(rule['metric'], value)}", host, "ok", ts)
 
 
 def check_rule(conn, host, rule, value, ts):
@@ -257,6 +266,7 @@ def add_rule(rule: RuleIn, x_admin_token: Optional[str] = Header(None)):
       cursor = conn.execute(
          "INSERT INTO alert_rules (metric, threshold, duration, level, host, enabled) VALUES (?, ?, ?, ?, ?, ?)",
          (rule.metric, rule.threshold, rule.duration, rule.level, rule.host, int(rule.enabled)))
+      log_event(conn, "rule", "added rule: " + describe_rule(rule), rule.host)
    return {"ok": True, "id": cursor.lastrowid}
 
 
@@ -270,6 +280,7 @@ def update_rule(rule_id: int, rule: RuleIn, x_admin_token: Optional[str] = Heade
          (rule.metric, rule.threshold, rule.duration, rule.level, rule.host, int(rule.enabled), rule_id)).rowcount
       if not changed:
          raise HTTPException(status_code=404, detail="No such rule")
+      log_event(conn, "rule", ("changed" if rule.enabled else "turned off") + " rule: " + describe_rule(rule), rule.host)
       if not rule.enabled:
          close_rule_alerts(conn, rule_id)
    forget_breaches(rule_id)
@@ -280,12 +291,26 @@ def update_rule(rule_id: int, rule: RuleIn, x_admin_token: Optional[str] = Heade
 def delete_rule(rule_id: int, x_admin_token: Optional[str] = Header(None)):
    require_admin(x_admin_token)
    with connect(SERVER_DB_PATH) as conn:
-      if not conn.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,)).rowcount:
+      old = conn.execute("SELECT * FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()
+      if old is None:
          raise HTTPException(status_code=404, detail="No such rule")
+      conn.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
+      log_event(conn, "rule", "deleted rule: " + describe_rule(RuleIn(**{k: old[k] for k in ("metric", "threshold", "duration", "level", "host")})), old["host"])
       close_rule_alerts(conn, rule_id)
       conn.execute("DELETE FROM alert_mutes WHERE rule_id = ?", (rule_id,))
    forget_breaches(rule_id)
    return {"ok": True}
+
+
+def describe_rule(rule):
+   label = METRICS.get(rule.metric, (rule.metric, ""))[0]
+   if rule.metric == "offline":
+      text = f"{label} after {fmt_value('offline', rule.threshold)}"
+   else:
+      text = f"{label} at or above {fmt_value(rule.metric, rule.threshold)}"
+      if rule.duration:
+         text += f" for {round(rule.duration / 60, 1):g} min"
+   return f"{text}, {rule.level}" + (f", only {rule.host}" if rule.host else "")
 
 
 def close_rule_alerts(conn, rule_id):
@@ -314,6 +339,7 @@ def ack_alert(alert_id: str, x_admin_token: Optional[str] = Header(None)):
    with connect(SERVER_DB_PATH) as conn:
       row = fleet_alert(conn, alert_id)
       conn.execute("UPDATE fleet_alerts SET acked_at = COALESCE(acked_at, ?) WHERE id = ?", (time.time(), row["id"]))
+      log_event(conn, "ack", f"acknowledged {METRICS.get(row['metric'], (row['metric'],))[0]} alert", row["host"])
    return {"ok": True}
 
 
@@ -326,6 +352,7 @@ def mute_alert(alert_id: str, mute: MuteIn, x_admin_token: Optional[str] = Heade
       row = fleet_alert(conn, alert_id)
       conn.execute("INSERT OR REPLACE INTO alert_mutes (host, rule_id, until) VALUES (?, ?, ?)",
                    (row["host"], row["rule_id"], until))
+      log_event(conn, "mute", f"muted {METRICS.get(row['metric'], (row['metric'],))[0]} alerts for {mute.minutes:g} min", row["host"])
    return {"ok": True, "muted_until": until}
 
 
@@ -335,4 +362,5 @@ def unmute_alert(alert_id: str, x_admin_token: Optional[str] = Header(None)):
    with connect(SERVER_DB_PATH) as conn:
       row = fleet_alert(conn, alert_id)
       conn.execute("DELETE FROM alert_mutes WHERE host = ? AND rule_id = ?", (row["host"], row["rule_id"]))
+      log_event(conn, "mute", f"unmuted {METRICS.get(row['metric'], (row['metric'],))[0]} alerts", row["host"])
    return {"ok": True}
